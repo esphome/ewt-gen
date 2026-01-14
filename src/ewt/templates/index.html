@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <script
+    type="module"
+    src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
+  ></script>
+  <style>
+    :root {
+      --primary-color: #0366d6;
+      --bg-color: #ffffff;
+      --text-color: #24292e;
+      --border-color: #e1e4e8;
+      --card-bg: #f6f8fa;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --primary-color: #58a6ff;
+        --bg-color: #0d1117;
+        --text-color: #c9d1d9;
+        --border-color: #30363d;
+        --card-bg: #161b22;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 2rem;
+      background: var(--bg-color);
+      color: var(--text-color);
+      line-height: 1.6;
+    }
+
+    h1 {
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 0.5rem;
+    }
+
+    h2 {
+      margin-top: 2rem;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin: 1rem 0;
+    }
+
+    .install-section {
+      text-align: center;
+      padding: 2rem;
+    }
+
+    esp-web-install-button {
+      --esp-tools-button-color: var(--primary-color);
+    }
+
+    a {
+      color: var(--primary-color);
+    }
+
+    .download-link {
+      display: inline-block;
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      text-decoration: none;
+      margin: 0.5rem 0.5rem 0.5rem 0;
+    }
+
+    .download-link:hover {
+      background: var(--card-bg);
+    }
+
+    code {
+      background: var(--card-bg);
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+
+    .chip-badge {
+      display: inline-block;
+      background: var(--primary-color);
+      color: white;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      margin-left: 0.5rem;
+    }
+
+    ol {
+      padding-left: 1.5rem;
+    }
+
+    li {
+      margin: 0.5rem 0;
+    }
+
+    .not-supported {
+      display: none;
+      color: #b00;
+      padding: 1rem;
+      background: #fee;
+      border-radius: 4px;
+      margin-top: 1rem;
+    }
+
+    esp-web-install-button[install-unsupported] + .not-supported {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <h1>{{ title }} <span class="chip-badge">{{ chip_family }}</span></h1>
+
+  <div class="card install-section">
+    <h2>Install Firmware</h2>
+    <p>Connect your device via USB and click the button below to install.</p>
+
+    <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+
+    <div class="not-supported">
+      <strong>Browser not supported.</strong><br>
+      ESP Web Tools requires a Chromium-based browser (Chrome, Edge) with Web Serial support.
+      Please use one of these browsers, or follow the manual installation instructions below.
+    </div>
+  </div>
+
+  <h2>Downloads</h2>
+  <p>
+    <a href="{{ yaml_filename }}" class="download-link" download>Download ESPHome YAML</a>
+    <a href="firmware.bin" class="download-link" download>Download Firmware Binary</a>
+  </p>
+
+  <h2>Manual Installation</h2>
+  <div class="card">
+    <p>If the web installer doesn't work for you, install manually using <a href="https://web.esphome.io" target="_blank">web.esphome.io</a>:</p>
+    <ol>
+      <li>Download the <a href="firmware.bin" download>firmware binary</a> above</li>
+      <li>Go to <a href="https://web.esphome.io" target="_blank">web.esphome.io</a></li>
+      <li>Click <strong>CONNECT</strong> and select your device</li>
+      <li>Click the three dots menu and select <strong>Install</strong></li>
+      <li>Choose the downloaded <code>firmware.bin</code> file</li>
+      <li>Wait for the installation to complete</li>
+    </ol>
+  </div>
+
+  <h2>ESPHome Configuration</h2>
+  <p>
+    Want to customize this firmware? Download the <a href="{{ yaml_filename }}" download>YAML configuration</a>
+    and use it with <a href="https://esphome.io" target="_blank">ESPHome</a>.
+  </p>
+</body>
+</html>
