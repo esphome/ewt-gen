@@ -66,11 +66,11 @@ def main(
 
     YAML_SOURCE is the ESPHome configuration file path or URL.
     """
-    yaml_file = resolve_yaml_source(yaml_source)
+    yaml_file, was_downloaded = resolve_yaml_source(yaml_source)
 
-    # Load YAML to get configuration info
+    # Load YAML to get configuration info (with ESPHome tag support)
     with open(yaml_file) as f:
-        config = yaml.safe_load(f)
+        config = load_esphome_yaml(f)
 
     # Determine project name
     esphome_config = config.get("esphome", {})
@@ -129,21 +129,47 @@ def main(
         title=title,
     )
 
+    # Clean up downloaded YAML (it's already copied to output)
+    if was_downloaded:
+        yaml_file.unlink()
+
     click.echo(f"\nStatic site generated at: {output}")
     click.echo("Serve with any static file server (must be HTTPS for ESP Web Tools)")
 
 
-def resolve_yaml_source(source: str) -> Path:
-    """Resolve a YAML source (file path or URL) to a local file path."""
+def load_esphome_yaml(stream):
+    """Load ESPHome YAML with support for custom tags like !lambda, !secret, etc."""
+    class ESPHomeLoader(yaml.SafeLoader):
+        pass
+
+    # Handle all unknown tags by returning the value as-is
+    def constructor_undefined(loader, tag_suffix, node):
+        if isinstance(node, yaml.ScalarNode):
+            return loader.construct_scalar(node)
+        if isinstance(node, yaml.SequenceNode):
+            return loader.construct_sequence(node)
+        if isinstance(node, yaml.MappingNode):
+            return loader.construct_mapping(node)
+
+    ESPHomeLoader.add_multi_constructor("!", constructor_undefined)
+
+    return yaml.load(stream, Loader=ESPHomeLoader)
+
+
+def resolve_yaml_source(source: str) -> tuple[Path, bool]:
+    """Resolve a YAML source (file path or URL) to a local file path.
+
+    Returns (path, was_downloaded) tuple.
+    """
     # Check if it's a URL
     if source.startswith(("http://", "https://")):
-        return download_yaml(source)
+        return download_yaml(source), True
 
     # It's a local file path
     path = Path(source)
     if not path.exists():
         raise click.ClickException(f"File not found: {source}")
-    return path.resolve()
+    return path.resolve(), False
 
 
 def download_yaml(url: str) -> Path:
