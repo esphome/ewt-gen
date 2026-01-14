@@ -9,7 +9,7 @@ Generate static websites for ESPHome firmware distribution using ESP Web Tools.
 uvx ewt-gen config.yaml
 
 # From a URL
-uvx ewt-gen https://github.com/esphome/wake-word-voice-assistants/blob/main/esp32-s3-box-3/esp32-s3-box-3.yaml
+uvx ewt-gen https://github.com/esphome/firmware/blob/main/esphome-web/esp32.factory.yaml
 ```
 
 ## Installation

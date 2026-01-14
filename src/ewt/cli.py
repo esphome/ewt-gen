@@ -98,7 +98,7 @@ def main(
 
     # Find firmware binary
     if firmware is None:
-        firmware = find_firmware(yaml_file, config)
+        firmware = find_firmware(yaml_file, project_name)
 
     if firmware is None:
         raise click.ClickException(
@@ -272,7 +272,7 @@ def compile_with_esphome(yaml_file: Path, *, pre_release: bool = False) -> None:
         )
 
 
-def find_firmware(yaml_file: Path, config: dict) -> Path | None:
+def find_firmware(yaml_file: Path, project_name: str) -> Path | None:
     """Try to find the firmware binary for the given YAML file."""
     yaml_dir = yaml_file.parent
 
@@ -282,9 +282,6 @@ def find_firmware(yaml_file: Path, config: dict) -> Path | None:
         return bin_file
 
     # Try ESPHome build directory
-    esphome_config = config.get("esphome", {})
-    project_name = esphome_config.get("name", yaml_file.stem)
-
     esphome_build_dir = yaml_dir / ".esphome" / "build" / project_name / ".pioenvs"
     if esphome_build_dir.exists():
         # Look for firmware.bin in any subdirectory
