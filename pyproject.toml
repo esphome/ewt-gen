@@ -1,12 +1,32 @@
 [project]
-name = "ewt"
+name = "ewt-gen"
 version = "0.1.0"
 description = "Generate static websites for ESPHome firmware distribution using ESP Web Tools"
+readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.10"
+keywords = ["esphome", "esp32", "esp8266", "firmware", "web-tools"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Home Automation",
+]
 dependencies = [
     "click>=8.0",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/esphome/ewt-gen"
+Repository = "https://github.com/esphome/ewt-gen"
+Issues = "https://github.com/esphome/ewt-gen/issues"
 
 [project.scripts]
 ewt-gen = "ewt.cli:main"
