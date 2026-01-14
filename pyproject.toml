@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ewt = "ewt.cli:main"
+ewt-gen = "ewt.cli:main"
 
 [build-system]
 requires = ["hatchling"]

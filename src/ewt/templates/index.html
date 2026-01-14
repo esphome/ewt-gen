@@ -15,6 +15,8 @@
       --text-color: #24292e;
       --border-color: #e1e4e8;
       --card-bg: #f6f8fa;
+      --warning-bg: #fff8e6;
+      --warning-border: #f0c36d;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -24,6 +26,8 @@
         --text-color: #c9d1d9;
         --border-color: #30363d;
         --card-bg: #161b22;
+        --warning-bg: #3d2e00;
+        --warning-border: #6e5a1f;
       }
     }
 
@@ -121,12 +125,41 @@
     esp-web-install-button[install-unsupported] + .not-supported {
       display: block;
     }
+
+    .insecure-context {
+      display: none;
+    }
+
+    .insecure-context .warning {
+      background: var(--warning-bg);
+      border: 1px solid var(--warning-border);
+      border-radius: 8px;
+      padding: 1rem 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    body.insecure .secure-only {
+      display: none;
+    }
+
+    body.insecure .insecure-context {
+      display: block;
+    }
+
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border-color);
+      font-size: 0.85rem;
+      color: var(--text-color);
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
   <h1>{{ title }} <span class="chip-badge">{{ chip_family }}</span></h1>
 
-  <div class="card install-section">
+  <div class="card install-section secure-only">
     <h2>Install Firmware</h2>
     <p>Connect your device via USB and click the button below to install.</p>
 
@@ -139,29 +172,52 @@
     </div>
   </div>
 
+  <div class="insecure-context">
+    <div class="warning">
+      <strong>Browser-based installation requires HTTPS.</strong><br>
+      This page is not served over a secure connection, so the install button won't work.
+      Use <a href="https://web.esphome.io" target="_blank">web.esphome.io</a> to install the firmware instead.
+    </div>
+
+    <h2>Manual Installation</h2>
+    <div class="card">
+      <p>Install using <a href="https://web.esphome.io" target="_blank">web.esphome.io</a>:</p>
+      <ol>
+        <li>Download the <a href="firmware.bin" download>firmware binary</a> below</li>
+        <li>Go to <a href="https://web.esphome.io" target="_blank">web.esphome.io</a></li>
+        <li>Click <strong>CONNECT</strong> and select your device</li>
+        <li>Click the three dots menu and select <strong>Install</strong></li>
+        <li>Choose the downloaded <code>firmware.bin</code> file</li>
+        <li>Wait for the installation to complete</li>
+      </ol>
+    </div>
+  </div>
+
   <h2>Downloads</h2>
   <p>
     <a href="{{ yaml_filename }}" class="download-link" download>Download ESPHome YAML</a>
     <a href="firmware.bin" class="download-link" download>Download Firmware Binary</a>
   </p>
 
-  <h2>Manual Installation</h2>
-  <div class="card">
-    <p>If the web installer doesn't work for you, install manually using <a href="https://web.esphome.io" target="_blank">web.esphome.io</a>:</p>
-    <ol>
-      <li>Download the <a href="firmware.bin" download>firmware binary</a> above</li>
-      <li>Go to <a href="https://web.esphome.io" target="_blank">web.esphome.io</a></li>
-      <li>Click <strong>CONNECT</strong> and select your device</li>
-      <li>Click the three dots menu and select <strong>Install</strong></li>
-      <li>Choose the downloaded <code>firmware.bin</code> file</li>
-      <li>Wait for the installation to complete</li>
-    </ol>
-  </div>
-
   <h2>ESPHome Configuration</h2>
   <p>
     Want to customize this firmware? Download the <a href="{{ yaml_filename }}" download>YAML configuration</a>
     and use it with <a href="https://esphome.io" target="_blank">ESPHome</a>.
   </p>
+
+  <footer>
+    <p>
+      Generated on {{ build_date }} by <a href="https://github.com/esphome/ewt-gen" target="_blank">ewt-gen</a>.
+      Powered by <a href="https://esphome.github.io/esp-web-tools/" target="_blank">ESP Web Tools</a>
+      and <a href="https://esphome.io" target="_blank">ESPHome</a>
+      by the <a href="https://www.openhomefoundation.org/" target="_blank">Open Home Foundation</a>.
+    </p>
+  </footer>
+
+  <script>
+    if (!window.isSecureContext) {
+      document.body.classList.add('insecure');
+    }
+  </script>
 </body>
 </html>

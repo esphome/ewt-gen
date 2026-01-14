@@ -1,8 +1,12 @@
 """CLI interface for EWT."""
 
+import re
 import shutil
 import subprocess
+import tempfile
+import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 import click
 import yaml
@@ -10,15 +14,9 @@ import yaml
 from ewt.generator import generate_site
 
 
-@click.group()
+@click.command()
 @click.version_option()
-def main():
-    """EWT - Generate static websites for ESPHome firmware distribution."""
-    pass
-
-
-@main.command()
-@click.argument("yaml_file", type=click.Path(exists=True, path_type=Path))
+@click.argument("yaml_source")
 @click.option(
     "--skip-compile",
     is_flag=True,
@@ -55,8 +53,8 @@ def main():
     is_flag=True,
     help="Use pre-release ESPHome version (uvx only, forces refresh).",
 )
-def generate(
-    yaml_file: Path,
+def main(
+    yaml_source: str,
     skip_compile: bool,
     firmware: Path | None,
     chip_family: str | None,
@@ -66,9 +64,9 @@ def generate(
 ):
     """Generate a static website for firmware distribution.
 
-    YAML_FILE is the ESPHome configuration file.
+    YAML_SOURCE is the ESPHome configuration file path or URL.
     """
-    yaml_file = yaml_file.resolve()
+    yaml_file = resolve_yaml_source(yaml_source)
 
     # Load YAML to get configuration info
     with open(yaml_file) as f:
@@ -135,27 +133,105 @@ def generate(
     click.echo("Serve with any static file server (must be HTTPS for ESP Web Tools)")
 
 
-def compile_with_esphome(yaml_file: Path, *, pre_release: bool = False) -> None:
-    """Compile the ESPHome configuration."""
-    if shutil.which("esphome") and not pre_release:
-        cmd = ["esphome", "compile", str(yaml_file)]
-    elif shutil.which("uvx"):
-        cmd = ["uvx"]
-        if pre_release:
-            cmd += ["--prerelease", "allow", "--refresh"]
-        cmd += ["esphome", "compile", str(yaml_file)]
-    else:
-        raise click.ClickException(
-            "ESPHome not found. Please install ESPHome or uv:\n"
-            "  pip install esphome\n"
-            "Or use --skip-compile with --firmware to provide a pre-built binary."
-        )
+def resolve_yaml_source(source: str) -> Path:
+    """Resolve a YAML source (file path or URL) to a local file path."""
+    # Check if it's a URL
+    if source.startswith(("http://", "https://")):
+        return download_yaml(source)
+
+    # It's a local file path
+    path = Path(source)
+    if not path.exists():
+        raise click.ClickException(f"File not found: {source}")
+    return path.resolve()
+
+
+def download_yaml(url: str) -> Path:
+    """Download YAML from a URL and save to a temporary file."""
+    # Convert GitHub blob URLs to raw URLs
+    url = convert_to_raw_url(url)
+
+    click.echo(f"Downloading {url}...")
 
     try:
-        subprocess.run(cmd, check=True, cwd=yaml_file.parent)
-    except subprocess.CalledProcessError as e:
+        req = urllib.request.Request(url, headers={"User-Agent": "ewt"})
+        with urllib.request.urlopen(req) as response:
+            content = response.read().decode("utf-8")
+    except urllib.error.URLError as e:
+        raise click.ClickException(f"Failed to download {url}: {e}")
+
+    # Extract filename from URL
+    parsed = urlparse(url)
+    filename = Path(parsed.path).name
+    if not filename.endswith((".yaml", ".yml")):
+        filename = "config.yaml"
+
+    # Save to temp file in current directory (so .esphome is created here)
+    yaml_file = Path.cwd() / filename
+    yaml_file.write_text(content)
+
+    return yaml_file
+
+
+def convert_to_raw_url(url: str) -> str:
+    """Convert GitHub/Gist URLs to raw content URLs."""
+    # GitHub blob URL: https://github.com/user/repo/blob/branch/path/file.yaml
+    # -> https://raw.githubusercontent.com/user/repo/branch/path/file.yaml
+    github_blob = re.match(
+        r"https://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)", url
+    )
+    if github_blob:
+        user, repo, branch, path = github_blob.groups()
+        return f"https://raw.githubusercontent.com/{user}/{repo}/{branch}/{path}"
+
+    # GitHub Gist URL: https://gist.github.com/user/gist_id
+    # or https://gist.github.com/user/gist_id#file-filename-yaml
+    # -> https://gist.githubusercontent.com/user/gist_id/raw/filename.yaml
+    gist_match = re.match(
+        r"https://gist\.github\.com/([^/]+)/([^/#]+)(?:#file-(.+))?", url
+    )
+    if gist_match:
+        user, gist_id, file_fragment = gist_match.groups()
+        if file_fragment:
+            # Convert file-name-yaml to name.yaml
+            filename = file_fragment.replace("-", ".")
+            # Fix double dots from extension
+            filename = re.sub(r"\.([^.]+)$", lambda m: "." + m.group(1), filename)
+            return f"https://gist.githubusercontent.com/{user}/{gist_id}/raw/{filename}"
+        return f"https://gist.githubusercontent.com/{user}/{gist_id}/raw"
+
+    # Already a raw URL or other URL, return as-is
+    return url
+
+
+def compile_with_esphome(yaml_file: Path, *, pre_release: bool = False) -> None:
+    """Compile the ESPHome configuration."""
+    cwd = yaml_file.parent
+
+    # If pre-release requested, must use uvx
+    if pre_release:
+        if not shutil.which("uvx"):
+            raise click.ClickException(
+                "uvx not found. Please install uv to use --pre-release."
+            )
+        cmd = ["uvx", "--prerelease", "allow", "--refresh", "esphome", "compile", str(yaml_file)]
+    else:
+        # Try local esphome first, fall back to uvx
+        if shutil.which("esphome"):
+            cmd = ["esphome", "compile", str(yaml_file)]
+        elif shutil.which("uvx"):
+            cmd = ["uvx", "esphome", "compile", str(yaml_file)]
+        else:
+            raise click.ClickException(
+                "ESPHome not found. Please install ESPHome or uv:\n"
+                "  pip install esphome\n"
+                "Or use --skip-compile with --firmware to provide a pre-built binary."
+            )
+
+    result = subprocess.run(cmd, cwd=cwd)
+    if result.returncode != 0:
         raise click.ClickException(
-            f"ESPHome compilation failed with exit code {e.returncode}"
+            f"ESPHome compilation failed with exit code {result.returncode}"
         )
 
 

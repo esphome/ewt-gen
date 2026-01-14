@@ -3,6 +3,7 @@
 import json
 import re
 import shutil
+from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
 
@@ -35,11 +36,13 @@ def generate_site(
         json.dump(manifest, f, indent=2)
 
     # Generate index.html from template
+    build_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     html = render_template(
         "index.html",
         title=title,
         yaml_filename=yaml_file.name,
         chip_family=chip_family,
+        build_date=build_date,
     )
     html_path = output_dir / "index.html"
     with open(html_path, "w") as f:
