@@ -72,13 +72,24 @@ def main(
     with open(yaml_file) as f:
         config = load_esphome_yaml(f)
 
+    # Get substitutions for variable expansion
+    substitutions = config.get("substitutions", {})
+
+    def expand_substitutions(value: str) -> str:
+        """Expand ${var} substitutions in a string."""
+        if not isinstance(value, str):
+            return value
+        for key, sub_value in substitutions.items():
+            value = value.replace(f"${{{key}}}", str(sub_value))
+        return value
+
     # Determine project name
     esphome_config = config.get("esphome", {})
-    project_name = esphome_config.get("name", yaml_file.stem)
+    project_name = expand_substitutions(esphome_config.get("name", "")) or yaml_file.stem
 
     # Determine title
     if not title:
-        title = esphome_config.get("friendly_name") or project_name
+        title = expand_substitutions(esphome_config.get("friendly_name", "")) or project_name
 
     # Compile with ESPHome if needed
     if not skip_compile and firmware is None:
