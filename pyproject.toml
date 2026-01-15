@@ -1,6 +1,6 @@
 [project]
 name = "ewt-gen"
-version = "0.1.0"
+version = "0.0.0"
 description = "Generate static websites for ESPHome firmware distribution using ESP Web Tools"
 readme = "README.md"
 license = "Apache-2.0"

@@ -10,8 +10,58 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Validate version
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          IS_PRERELEASE=${{ github.event.release.prerelease }}
+
+          # Check version format (semver)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([ab][0-9]+)?$ ]]; then
+            echo "Error: Invalid version format '$VERSION'"
+            echo "Expected: X.Y.Z or X.Y.ZaN or X.Y.ZbN"
+            exit 1
+          fi
+
+          # Pre-release must have 'a' or 'b' suffix
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            if ! [[ "$VERSION" =~ [ab][0-9]+$ ]]; then
+              echo "Error: Pre-release version must end with 'aN' or 'bN' (e.g., 1.0.0b1)"
+              exit 1
+            fi
+          else
+            if [[ "$VERSION" =~ [ab][0-9]+$ ]]; then
+              echo "Error: Stable release version must not have 'a' or 'b' suffix"
+              exit 1
+            fi
+          fi
+
+          echo "Version '$VERSION' is valid"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
+
+      - name: Update version in pyproject.toml
+        run: |
+          uv run --with tomli --with tomli-w python -c "
+          import tomli
+          import tomli_w
+
+          with open('pyproject.toml', 'rb') as f:
+              pyproject = tomli.load(f)
+
+          pyproject['project']['version'] = '${{ steps.version.outputs.version }}'
+
+          with open('pyproject.toml', 'wb') as f:
+              tomli_w.dump(pyproject, f)
+
+          print('Updated version to ${{ steps.version.outputs.version }}')
+          "
 
       - name: Build package
         run: uv build
