@@ -46,6 +46,10 @@
     }
 
     h1 {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
       border-bottom: 1px solid var(--border-color);
       padding-bottom: 0.5rem;
     }
@@ -75,19 +79,6 @@
       color: var(--primary-color);
     }
 
-    .download-link {
-      display: inline-block;
-      padding: 0.5rem 1rem;
-      border: 1px solid var(--border-color);
-      border-radius: 4px;
-      text-decoration: none;
-      margin: 0.5rem 0.5rem 0.5rem 0;
-    }
-
-    .download-link:hover {
-      background: var(--card-bg);
-    }
-
     code {
       background: var(--card-bg);
       padding: 0.2rem 0.4rem;
@@ -103,6 +94,41 @@
       border-radius: 4px;
       font-size: 0.85rem;
       margin-left: 0.5rem;
+      vertical-align: middle;
+    }
+
+    .yaml-details {
+      margin: 1rem 0;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+    }
+
+    .yaml-details summary {
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      font-weight: 500;
+      background: var(--card-bg);
+      border-radius: 8px;
+    }
+
+    .yaml-details[open] summary {
+      border-bottom: 1px solid var(--border-color);
+      border-radius: 8px 8px 0 0;
+    }
+
+    .yaml-details pre {
+      margin: 0;
+      padding: 1rem;
+      overflow-x: auto;
+      background: var(--card-bg);
+      border-radius: 0 0 8px 8px;
+    }
+
+    .yaml-details pre code {
+      background: none;
+      padding: 0;
+      font-size: 0.85em;
+      line-height: 1.5;
     }
 
     ol {
@@ -193,17 +219,21 @@
     </div>
   </div>
 
-  <h2>Downloads</h2>
+  <h2>Alternative install</h2>
   <p>
-    <a href="{{ yaml_filename }}" class="download-link" download>Download ESPHome YAML</a>
-    <a href="firmware.bin" class="download-link" download>Download Firmware Binary</a>
+    Download <a href="firmware.bin" download>binary</a> and use your own tool
+    (like <a href="https://web.esphome.io" target="_blank">ESPHome Web</a>).
   </p>
 
   <h2>ESPHome Configuration</h2>
   <p>
-    Want to customize this firmware? Download the <a href="{{ yaml_filename }}" download>YAML configuration</a>
-    and use it with <a href="https://esphome.io" target="_blank">ESPHome</a>.
+    {{ esphome_config_html }}
   </p>
+
+  <details class="yaml-details">
+    <summary>View configuration</summary>
+    <pre><code>{{ yaml_content }}</code></pre>
+  </details>
 
   <footer>
     <p>
