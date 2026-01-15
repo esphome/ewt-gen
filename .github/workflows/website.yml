@@ -28,7 +28,7 @@ jobs:
 
       - name: Build ESPHome Web firmware site
         run: |
-          uvx ewt-gen \
+          uv run ewt-gen \
             https://github.com/esphome/firmware/blob/main/esphome-web/esp32.factory.yaml \
             https://github.com/esphome/firmware/blob/main/esphome-web/esp32c3.factory.yaml \
             https://github.com/esphome/firmware/blob/main/esphome-web/esp32c6.factory.yaml \
