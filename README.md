@@ -1,6 +1,6 @@
 # ewt-gen
 
-Generate static websites for ESPHome firmware distribution using ESP Web Tools.
+Generate static websites for ESPHome firmware distribution using ESP Web Tools. [Example output.](https://esphome.github.io/ewt-gen/)
 
 ## Quick Start
 
