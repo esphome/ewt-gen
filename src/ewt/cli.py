@@ -15,7 +15,7 @@ from ewt.generator import generate_site
 
 
 @click.command()
-@click.version_option()
+@click.version_option(package_name="ewt-gen")
 @click.argument("yaml_source")
 @click.option(
     "--skip-compile",
