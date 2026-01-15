@@ -92,7 +92,7 @@ def generate_site(
 
     # Build version badge HTML
     version_badge = ""
-    if version:
+    if version and version != "dev":
         version_badge = f' <span class="version-badge">v{version}</span>'
 
     html_output = render_template(
