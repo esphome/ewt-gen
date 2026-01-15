@@ -46,12 +46,17 @@
     }
 
     h1 {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 0.5rem;
       border-bottom: 1px solid var(--border-color);
       padding-bottom: 0.5rem;
+    }
+
+    .version-badge {
+      font-size: 0.5em;
+      font-weight: normal;
+      color: var(--text-color);
+      opacity: 0.6;
+      margin-left: 0.5rem;
+      vertical-align: middle;
     }
 
     h2 {
@@ -71,6 +76,10 @@
       padding: 2rem;
     }
 
+    .install-section h2 {
+      margin-top: 0;
+    }
+
     esp-web-install-button {
       --esp-tools-button-color: var(--primary-color);
     }
@@ -86,19 +95,62 @@
       font-size: 0.9em;
     }
 
-    .chip-badge {
-      display: inline-block;
-      background: var(--primary-color);
-      color: white;
-      padding: 0.2rem 0.6rem;
-      border-radius: 4px;
-      font-size: 0.85rem;
-      margin-left: 0.5rem;
-      vertical-align: middle;
+    /* Tabs */
+    .tabs {
+      margin: 1rem 0;
+    }
+
+    .tabs input[type="radio"] {
+      display: none;
+    }
+
+    .tab-labels {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 0;
+    }
+
+    .tab-labels label {
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      border: 1px solid transparent;
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      margin-bottom: -1px;
+      background: var(--bg-color);
+    }
+
+    .tab-labels label:hover {
+      background: var(--card-bg);
+    }
+
+    .tab-content {
+      display: none;
+      padding: 1rem;
+      border: 1px solid var(--border-color);
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+      background: var(--card-bg);
+    }
+
+    {{ tab_css }}
+
+    .firmware-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      font-weight: 500;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      margin-bottom: 0.5rem;
     }
 
     .yaml-details {
-      margin: 1rem 0;
+      margin: 0.5rem 0 0 0;
       border: 1px solid var(--border-color);
       border-radius: 8px;
     }
@@ -111,6 +163,19 @@
       border-radius: 8px;
     }
 
+    .yaml-details summary .summary-content {
+      display: inline-flex;
+      justify-content: space-between;
+      align-items: center;
+      width: calc(100% - 1.5em);
+      margin-left: 8px;
+    }
+
+    .yaml-details summary .download-link {
+      font-weight: normal;
+      font-size: 0.85em;
+    }
+
     .yaml-details[open] summary {
       border-bottom: 1px solid var(--border-color);
       border-radius: 8px 8px 0 0;
@@ -120,7 +185,7 @@
       margin: 0;
       padding: 1rem;
       overflow-x: auto;
-      background: var(--card-bg);
+      background: var(--bg-color);
       border-radius: 0 0 8px 8px;
     }
 
@@ -183,7 +248,7 @@
   </style>
 </head>
 <body>
-  <h1>{{ title }} <span class="chip-badge">{{ chip_family }}</span></h1>
+  <h1>{{ title }}{{ version_badge }}</h1>
 
   <div class="card install-section secure-only">
     <h2>Install Firmware</h2>
@@ -204,36 +269,15 @@
       This page is not served over a secure connection, so the install button won't work.
       Use <a href="https://web.esphome.io" target="_blank">web.esphome.io</a> to install the firmware instead.
     </div>
-
-    <h2>Manual Installation</h2>
-    <div class="card">
-      <p>Install using <a href="https://web.esphome.io" target="_blank">web.esphome.io</a>:</p>
-      <ol>
-        <li>Download the <a href="firmware.bin" download>firmware binary</a> below</li>
-        <li>Go to <a href="https://web.esphome.io" target="_blank">web.esphome.io</a></li>
-        <li>Click <strong>CONNECT</strong> and select your device</li>
-        <li>Click the three dots menu and select <strong>Install</strong></li>
-        <li>Choose the downloaded <code>firmware.bin</code> file</li>
-        <li>Wait for the installation to complete</li>
-      </ol>
-    </div>
   </div>
 
-  <h2>Alternative install</h2>
-  <p>
-    Download <a href="firmware.bin" download>binary</a> and use your own tool
-    (like <a href="https://web.esphome.io" target="_blank">ESPHome Web</a>).
-  </p>
-
-  <h2>ESPHome Configuration</h2>
-  <p>
-    {{ esphome_config_html }}
-  </p>
-
-  <details class="yaml-details">
-    <summary>View configuration</summary>
-    <pre><code>{{ yaml_content }}</code></pre>
-  </details>
+  <div class="tabs">
+    {{ tab_inputs }}
+    <div class="tab-labels">
+      {{ tab_labels }}
+    </div>
+    {{ tab_contents }}
+  </div>
 
   <footer>
     <p>

@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Generate test variants of ewt-gen output for manual inspection.
+# Run from repository root: ./tests/create_variants
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONFIG_DIR="$SCRIPT_DIR/config"
+OUTPUT_DIR="$SCRIPT_DIR/output"
+
+# Clean previous output
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+
+# Remove any leftover factory files
+rm -f "$CONFIG_DIR"/*.factory.yaml
+
+echo "=== Generating test variants ==="
+echo ""
+
+# Single config - ESP32
+echo "1. Single config (ESP32)"
+uv run ewt-gen --skip-compile \
+    "$CONFIG_DIR/esp32.yaml" \
+    --fw-version "1.2.3" \
+    --output "$OUTPUT_DIR/single-esp32"
+
+# Single config - ESP32-C3
+echo ""
+echo "2. Single config (ESP32-C3)"
+uv run ewt-gen --skip-compile \
+    "$CONFIG_DIR/esp32c3.yaml" \
+    --fw-version "1.2.3" \
+    --output "$OUTPUT_DIR/single-esp32c3"
+
+# Multiple configs
+echo ""
+echo "3. Multiple configs (ESP32 + ESP32-C3)"
+uv run ewt-gen --skip-compile \
+    "$CONFIG_DIR/esp32.yaml" \
+    "$CONFIG_DIR/esp32c3.yaml" \
+    --fw-version "1.2.3" \
+    --output "$OUTPUT_DIR/multi-chip"
+
+# With publish URL (adds OTA extension)
+echo ""
+echo "4. Multiple configs with --publish-url (OTA extension)"
+uv run ewt-gen --skip-compile \
+    "$CONFIG_DIR/esp32.yaml" \
+    "$CONFIG_DIR/esp32c3.yaml" \
+    --publish-url "https://example.com/firmware" \
+    --fw-version "1.2.3" \
+    --output "$OUTPUT_DIR/multi-chip-ota"
+
+# With custom title
+echo ""
+echo "5. Single config with --title"
+uv run ewt-gen --skip-compile \
+    "$CONFIG_DIR/esp32.yaml" \
+    --title "Custom Firmware Title" \
+    --fw-version "1.2.3" \
+    --output "$OUTPUT_DIR/custom-title"
+
+# Clean up factory files created during test
+rm -f "$CONFIG_DIR"/*.factory.yaml
+
+echo ""
+echo "=== Done ==="
+echo "Output directories:"
+ls -1 "$OUTPUT_DIR"
+echo ""
+echo "Open in browser:"
+echo "  file://$OUTPUT_DIR/single-esp32/index.html"
+echo "  file://$OUTPUT_DIR/multi-chip/index.html"
+echo "  file://$OUTPUT_DIR/multi-chip-ota/index.html"

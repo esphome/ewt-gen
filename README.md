@@ -10,6 +10,9 @@ uvx ewt-gen config.yaml
 
 # From a URL
 uvx ewt-gen https://github.com/esphome/firmware/blob/main/esphome-web/esp32.factory.yaml
+
+# Multiple configurations
+uvx ewt-gen esp32.yaml esp32c3.yaml
 ```
 
 ## Installation

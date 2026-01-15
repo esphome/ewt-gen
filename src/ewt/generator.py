@@ -11,33 +11,67 @@ from pathlib import Path
 
 def generate_site(
     output_dir: Path,
-    yaml_file: Path,
-    firmware_file: Path,
-    chip_family: str,
+    builds: list[dict],
     title: str,
-    original_yaml_file: Path | None = None,
     version: str | None = None,
+    include_original_yaml: bool = False,
 ):
-    """Generate a static website for firmware distribution."""
+    """Generate a static website for firmware distribution.
+
+    builds is a list of dicts with keys:
+        - yaml_file: Path to original YAML
+        - compile_yaml_file: Path to compiled YAML (may include factory additions)
+        - firmware: Path to firmware binary
+        - chip_family: Normalized chip family string
+    """
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy files
-    yaml_dest = output_dir / yaml_file.name
-    firmware_dest = output_dir / "firmware.bin"
+    # Copy files for each build and collect tab data
+    manifest_builds = []
+    yaml_files_copied = set()
+    tab_data = []
 
-    shutil.copy(yaml_file, yaml_dest)
-    shutil.copy(firmware_file, firmware_dest)
+    for build in builds:
+        yaml_file = build["yaml_file"]
+        compile_yaml_file = build["compile_yaml_file"]
+        firmware_file = build["firmware"]
+        chip_family = build["chip_family"]
 
-    # Copy original YAML if provided (for factory builds that use !include)
-    if original_yaml_file is not None:
-        original_dest = output_dir / original_yaml_file.name
-        shutil.copy(original_yaml_file, original_dest)
+        # Copy firmware with chip-specific name
+        firmware_filename = f"firmware-{chip_family.lower().replace('-', '')}.bin"
+        firmware_dest = output_dir / firmware_filename
+        shutil.copy(firmware_file, firmware_dest)
+
+        manifest_builds.append({
+            "chipFamily": chip_family,
+            "parts": [{"path": firmware_filename, "offset": 0}],
+        })
+
+        # Copy YAML files (avoid duplicates)
+        if yaml_file.name not in yaml_files_copied:
+            shutil.copy(yaml_file, output_dir / yaml_file.name)
+            yaml_files_copied.add(yaml_file.name)
+
+        if include_original_yaml and compile_yaml_file.name not in yaml_files_copied:
+            shutil.copy(compile_yaml_file, output_dir / compile_yaml_file.name)
+            yaml_files_copied.add(compile_yaml_file.name)
+
+        # Collect tab data
+        tab_data.append({
+            "chip_family": chip_family,
+            "chip_id": chip_family.lower().replace("-", ""),
+            "firmware_filename": firmware_filename,
+            "yaml_filename": yaml_file.name,
+            "yaml_content": html.escape(yaml_file.read_text()),
+            "compile_yaml_filename": compile_yaml_file.name if include_original_yaml else None,
+            "compile_yaml_content": html.escape(compile_yaml_file.read_text()) if include_original_yaml else None,
+        })
 
     # Generate manifest.json
     manifest = generate_manifest(
         name=title,
-        chip_family=chip_family,
+        builds=manifest_builds,
         version=version,
     )
     manifest_path = output_dir / "manifest.json"
@@ -47,50 +81,101 @@ def generate_site(
     # Generate index.html from template
     build_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    # Build ESPHome configuration section based on whether we have factory + original
-    if original_yaml_file is not None:
-        esphome_config_html = (
-            f'Download <a href="{original_yaml_file.name}" download>original configuration</a> '
-            f'and the <a href="{yaml_file.name}" download>OTA/import extension</a> '
-            f'to customize it with <a href="https://esphome.io" target="_blank">ESPHome</a>.'
-        )
-        # Read original YAML content for display
-        yaml_content = original_yaml_file.read_text()
-    else:
-        esphome_config_html = (
-            f'Download the <a href="{yaml_file.name}" download>YAML configuration</a> '
-            f'to customize it with <a href="https://esphome.io" target="_blank">ESPHome</a>.'
-        )
-        # Read YAML content for display
-        yaml_content = yaml_file.read_text()
+    # Build tab HTML
+    tab_css, tab_inputs, tab_labels, tab_contents = generate_tabs_html(
+        tab_data, include_original_yaml
+    )
 
-    # HTML-escape the YAML content to prevent XSS
-    yaml_content_escaped = html.escape(yaml_content)
+    # Build version badge HTML
+    version_badge = ""
+    if version:
+        version_badge = f' <span class="version-badge">v{version}</span>'
 
     html_output = render_template(
         "index.html",
         title=title,
-        yaml_filename=yaml_file.name,
-        chip_family=chip_family,
+        version_badge=version_badge,
         build_date=build_date,
-        esphome_config_html=esphome_config_html,
-        yaml_content=yaml_content_escaped,
+        tab_css=tab_css,
+        tab_inputs=tab_inputs,
+        tab_labels=tab_labels,
+        tab_contents=tab_contents,
     )
     html_path = output_dir / "index.html"
     with open(html_path, "w") as f:
         f.write(html_output)
 
 
-def generate_manifest(name: str, chip_family: str, version: str | None = None) -> dict:
-    """Generate the ESP Web Tools manifest."""
+def generate_tabs_html(tab_data: list[dict], include_original_yaml: bool) -> tuple[str, str, str, str]:
+    """Generate HTML for chip selection tabs.
+
+    Returns (tab_css, tab_inputs, tab_labels, tab_contents).
+    """
+    tab_css_parts = []
+    tab_inputs_parts = []
+    tab_labels_parts = []
+    tab_contents_parts = []
+
+    for i, tab in enumerate(tab_data):
+        chip_id = tab["chip_id"]
+        chip_family = tab["chip_family"]
+        checked = " checked" if i == 0 else ""
+
+        # CSS for this tab (show content when radio is checked, style active label)
+        tab_css_parts.append(
+            f"#tab-{chip_id}:checked ~ .tab-content.content-{chip_id} {{ display: block; }}\n"
+            f"#tab-{chip_id}:checked ~ .tab-labels label[for='tab-{chip_id}'] {{ "
+            f"background: var(--card-bg); border-color: var(--border-color); }}"
+        )
+
+        # Radio input
+        tab_inputs_parts.append(
+            f'<input type="radio" name="chip-tab" id="tab-{chip_id}"{checked}>'
+        )
+
+        # Label
+        tab_labels_parts.append(f'<label for="tab-{chip_id}">{chip_family}</label>')
+
+        # Content
+        content_parts = [
+            f'<div class="tab-content content-{chip_id}">',
+            f'  <div class="firmware-row"><span>Firmware</span> <a href="{tab["firmware_filename"]}" download class="download-link">Download</a></div>',
+            f'  <details class="yaml-details">',
+            f'    <summary><span class="summary-content">Configuration <a href="{tab["yaml_filename"]}" download class="download-link">Download</a></span></summary>',
+            f'    <pre><code>{tab["yaml_content"]}</code></pre>',
+            f'  </details>',
+        ]
+
+        # Add OTA extension accordion if available
+        if include_original_yaml and tab["compile_yaml_filename"]:
+            content_parts.extend([
+                f'  <details class="yaml-details">',
+                f'    <summary><span class="summary-content">OTA extension <a href="{tab["compile_yaml_filename"]}" download class="download-link">Download</a></span></summary>',
+                f'    <pre><code>{tab["compile_yaml_content"]}</code></pre>',
+                f'  </details>',
+            ])
+
+        content_parts.append('</div>')
+        tab_contents_parts.append('\n'.join(content_parts))
+
+    return (
+        "\n    ".join(tab_css_parts),
+        "\n    ".join(tab_inputs_parts),
+        "\n      ".join(tab_labels_parts),
+        "\n    ".join(tab_contents_parts),
+    )
+
+
+def generate_manifest(name: str, builds: list[dict], version: str | None = None) -> dict:
+    """Generate the ESP Web Tools manifest.
+
+    builds is a list of dicts with keys:
+        - chipFamily: The chip family string
+        - parts: List of firmware parts with path and offset
+    """
     manifest = {
         "name": name,
-        "builds": [
-            {
-                "chipFamily": chip_family,
-                "parts": [{"path": "firmware.bin", "offset": 0}],
-            }
-        ],
+        "builds": builds,
     }
 
     # Add version and home_assistant_domain if version is provided

@@ -16,26 +16,11 @@ from ewt.generator import generate_site
 
 @click.command()
 @click.version_option(package_name="ewt-gen")
-@click.argument("yaml_source")
+@click.argument("yaml_sources", nargs=-1, required=True)
 @click.option(
     "--skip-compile",
     is_flag=True,
     help="Skip ESPHome compilation (use existing firmware).",
-)
-@click.option(
-    "--firmware",
-    "-f",
-    type=click.Path(exists=True, path_type=Path),
-    help="Path to firmware binary. If not specified, uses ESPHome build output.",
-)
-@click.option(
-    "--chip-family",
-    "-c",
-    type=click.Choice(
-        ["ESP32", "ESP32-C3", "ESP32-S2", "ESP32-S3", "ESP8266"],
-        case_sensitive=False,
-    ),
-    help="Chip family. Auto-detected from YAML if not specified.",
 )
 @click.option(
     "--output",
@@ -63,10 +48,8 @@ from ewt.generator import generate_site
     help="Firmware version. Read from esphome.project.version if not specified.",
 )
 def main(
-    yaml_source: str,
+    yaml_sources: tuple[str, ...],
     skip_compile: bool,
-    firmware: Path | None,
-    chip_family: str | None,
     output: Path | None,
     title: str | None,
     pre_release: bool,
@@ -75,122 +58,176 @@ def main(
 ):
     """Generate a static website for firmware distribution.
 
-    YAML_SOURCE is the ESPHome configuration file path or URL.
+    YAML_SOURCES is one or more ESPHome configuration file paths or URLs.
+    When multiple configs are provided, they must have the same esphome.project.name
+    and no overlapping chip families.
     """
-    yaml_file, temp_dir = resolve_yaml_source(yaml_source)
+    # Process all YAML sources and collect build info
+    builds: list[dict] = []
+    temp_dirs: list[Path] = []
+    project_names: set[str] = set()
+    chip_families_seen: set[str] = set()
+    first_config_info: dict | None = None
 
-    # Load YAML to get configuration info (with ESPHome tag support)
-    with open(yaml_file) as f:
-        config = load_esphome_yaml(f)
+    for yaml_source in yaml_sources:
+        yaml_file, temp_dir = resolve_yaml_source(yaml_source)
+        if temp_dir:
+            temp_dirs.append(temp_dir)
 
-    # Get substitutions for variable expansion
-    substitutions = config.get("substitutions", {})
+        # Load YAML to get configuration info (with ESPHome tag support)
+        with open(yaml_file) as f:
+            config = load_esphome_yaml(f)
 
-    def expand_substitutions(value: str) -> str:
-        """Expand ${var} substitutions in a string."""
-        if not isinstance(value, str):
+        # Get substitutions for variable expansion
+        substitutions = config.get("substitutions", {})
+
+        def expand_substitutions(value: str) -> str:
+            """Expand ${var} substitutions in a string."""
+            if not isinstance(value, str):
+                return value
+            for key, sub_value in substitutions.items():
+                value = value.replace(f"${{{key}}}", str(sub_value))
             return value
-        for key, sub_value in substitutions.items():
-            value = value.replace(f"${{{key}}}", str(sub_value))
-        return value
 
-    # Determine project name
-    esphome_config = config.get("esphome", {})
-    project_name = expand_substitutions(esphome_config.get("name", "")) or yaml_file.stem
+        # Determine project name
+        esphome_config = config.get("esphome", {})
+        project_config = esphome_config.get("project", {})
+        esphome_project_name = expand_substitutions(project_config.get("name", ""))
+        device_name = expand_substitutions(esphome_config.get("name", "")) or yaml_file.stem
+
+        # Track project names for validation
+        if esphome_project_name:
+            project_names.add(esphome_project_name)
+
+        # Determine chip family
+        chip_family = detect_chip_family(config)
+        if chip_family is None:
+            raise click.ClickException(
+                f"Could not detect chip family from {yaml_file.name}."
+            )
+        chip_family = normalize_chip_family(chip_family)
+
+        # Check for overlapping chip families
+        if chip_family in chip_families_seen:
+            raise click.ClickException(
+                f"Duplicate chip family '{chip_family}' in {yaml_file.name}. "
+                "Each configuration must target a different chip family."
+            )
+        chip_families_seen.add(chip_family)
+
+        # Store first config info for title/version/output defaults
+        if first_config_info is None:
+            version = fw_version
+            if version is None:
+                version = expand_substitutions(project_config.get("version", ""))
+                if not version:
+                    version = None
+
+            first_config_info = {
+                "device_name": device_name,
+                "friendly_name": expand_substitutions(esphome_config.get("friendly_name", "")),
+                "version": version,
+                "yaml_file": yaml_file,
+                "project_name": esphome_project_name,
+            }
+
+        # If publish_url is provided, create a modified YAML with OTA components
+        compile_yaml_file = yaml_file
+        if publish_url:
+            # Convert source URL to github:// format for dashboard_import
+            package_import_url = None
+            if yaml_source.startswith(("http://", "https://")):
+                package_import_url = convert_to_esphome_github_url(yaml_source)
+
+            # Get version for this config
+            config_version = fw_version
+            if config_version is None:
+                config_version = expand_substitutions(project_config.get("version", ""))
+                if not config_version:
+                    config_version = None
+
+            compile_yaml_file = create_factory_yaml(
+                yaml_file=yaml_file,
+                publish_url=publish_url,
+                package_import_url=package_import_url,
+                version=config_version,
+            )
+            if config_version:
+                click.echo(f"Added OTA update support for {yaml_file.name}")
+            else:
+                click.echo(f"Added dashboard import for {yaml_file.name}")
+
+        # Compile with ESPHome if needed
+        if not skip_compile:
+            click.echo(f"Compiling {compile_yaml_file.name} with ESPHome...")
+            compile_with_esphome(compile_yaml_file, pre_release=pre_release)
+
+        # Find firmware binary
+        firmware = find_firmware(yaml_file, device_name)
+        if firmware is None:
+            raise click.ClickException(
+                f"Could not find firmware binary for {yaml_file.name}.\n"
+                f"Looked for: {yaml_file.stem}.bin, .esphome/build/{device_name}/.pioenvs/*/firmware.bin"
+            )
+
+        builds.append({
+            "yaml_file": yaml_file,
+            "compile_yaml_file": compile_yaml_file,
+            "firmware": firmware.resolve(),
+            "chip_family": chip_family,
+            "yaml_source": yaml_source,
+        })
+
+    # Validate project names when multiple configs
+    if len(yaml_sources) > 1:
+        if len(project_names) == 0:
+            raise click.ClickException(
+                "When using multiple configurations, all must have esphome.project.name set."
+            )
+        if len(project_names) > 1:
+            raise click.ClickException(
+                f"All configurations must have the same esphome.project.name. "
+                f"Found: {', '.join(sorted(project_names))}"
+            )
+
+    # Warn about version if publish_url is provided and no version found
+    if publish_url and first_config_info["version"] is None:
+        click.secho(
+            "Warning: No version found. OTA updates will not be included.\n"
+            "Specify --fw-version or add esphome.project.version to your YAML.",
+            fg="yellow",
+            err=True,
+        )
 
     # Determine title
     if not title:
-        title = expand_substitutions(esphome_config.get("friendly_name", "")) or project_name
-
-    # Determine version
-    version = fw_version
-    if version is None:
-        project_config = esphome_config.get("project", {})
-        version = expand_substitutions(project_config.get("version", ""))
-        if not version:
-            version = None
-
-    # If publish_url is provided, create a modified YAML with OTA components
-    compile_yaml_file = yaml_file
-    if publish_url:
-        # Convert source URL to github:// format for dashboard_import
-        package_import_url = None
-        if yaml_source.startswith(("http://", "https://")):
-            package_import_url = convert_to_esphome_github_url(yaml_source)
-
-        # Warn if no version - OTA updates won't work without it
-        if version is None:
-            click.secho(
-                "Warning: No version found. OTA updates will not be included.\n"
-                "Specify --fw-version or add esphome.project.version to your YAML.",
-                fg="yellow",
-                err=True,
-            )
-
-        compile_yaml_file = create_factory_yaml(
-            yaml_file=yaml_file,
-            publish_url=publish_url,
-            package_import_url=package_import_url,
-            version=version,
-        )
-        if version:
-            click.echo(f"Added OTA update support (publish URL: {publish_url})")
-        else:
-            click.echo(f"Added dashboard import (publish URL: {publish_url})")
-
-    # Compile with ESPHome if needed
-    if not skip_compile and firmware is None:
-        click.echo(f"Compiling {compile_yaml_file.name} with ESPHome...")
-        compile_with_esphome(compile_yaml_file, pre_release=pre_release)
-
-    # Find firmware binary
-    if firmware is None:
-        firmware = find_firmware(yaml_file, project_name)
-
-    if firmware is None:
-        raise click.ClickException(
-            f"Could not find firmware binary. Please specify with --firmware option.\n"
-            f"Looked for: {yaml_file.stem}.bin, .esphome/build/{project_name}/.pioenvs/*/firmware.bin"
-        )
-
-    firmware = firmware.resolve()
-
-    # Determine chip family
-    if chip_family is None:
-        chip_family = detect_chip_family(config)
-
-    if chip_family is None:
-        raise click.ClickException(
-            "Could not detect chip family from YAML. Please specify with --chip-family option."
-        )
-
-    # Normalize chip family
-    chip_family = normalize_chip_family(chip_family)
+        title = first_config_info["friendly_name"] or first_config_info["device_name"]
 
     # Determine output directory
     if output is None:
-        output = Path.cwd() / yaml_file.stem
+        if len(yaml_sources) > 1 and first_config_info["project_name"]:
+            # For multi-config, use project name (e.g., "esphome.web" -> "esphome-web")
+            output = Path.cwd() / first_config_info["project_name"].replace(".", "-")
+        else:
+            output = Path.cwd() / first_config_info["yaml_file"].stem
 
     output = output.resolve()
 
-    click.echo(f"Generating static site for {project_name}")
-    click.echo(f"  YAML: {compile_yaml_file}")
-    click.echo(f"  Firmware: {firmware}")
-    click.echo(f"  Chip: {chip_family}")
+    click.echo(f"\nGenerating static site for {title}")
+    for build in builds:
+        click.echo(f"  {build['chip_family']}: {build['firmware']}")
     click.echo(f"  Output: {output}")
 
     generate_site(
         output_dir=output,
-        yaml_file=compile_yaml_file,
-        firmware_file=firmware,
-        chip_family=chip_family,
+        builds=builds,
         title=title,
-        original_yaml_file=yaml_file if publish_url else None,
-        version=version,
+        version=first_config_info["version"],
+        include_original_yaml=publish_url is not None,
     )
 
-    # Clean up temp directory (YAML is already copied to output)
-    if temp_dir is not None:
+    # Clean up temp directories
+    for temp_dir in temp_dirs:
         shutil.rmtree(temp_dir)
 
     click.echo(f"\nStatic site generated at: {output}")

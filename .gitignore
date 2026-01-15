@@ -3,3 +3,7 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Test outputs
+tests/config/.esphome/
+tests/output/
