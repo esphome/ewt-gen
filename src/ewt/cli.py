@@ -66,7 +66,7 @@ def main(
 
     YAML_SOURCE is the ESPHome configuration file path or URL.
     """
-    yaml_file, was_downloaded = resolve_yaml_source(yaml_source)
+    yaml_file, temp_dir = resolve_yaml_source(yaml_source)
 
     # Load YAML to get configuration info (with ESPHome tag support)
     with open(yaml_file) as f:
@@ -140,9 +140,9 @@ def main(
         title=title,
     )
 
-    # Clean up downloaded YAML (it's already copied to output)
-    if was_downloaded:
-        yaml_file.unlink()
+    # Clean up temp directory (YAML is already copied to output)
+    if temp_dir is not None:
+        shutil.rmtree(temp_dir)
 
     click.echo(f"\nStatic site generated at: {output}")
     click.echo("Serve with any static file server (must be HTTPS for ESP Web Tools)")
@@ -167,24 +167,28 @@ def load_esphome_yaml(stream):
     return yaml.load(stream, Loader=ESPHomeLoader)
 
 
-def resolve_yaml_source(source: str) -> tuple[Path, bool]:
+def resolve_yaml_source(source: str) -> tuple[Path, Path | None]:
     """Resolve a YAML source (file path or URL) to a local file path.
 
-    Returns (path, was_downloaded) tuple.
+    Returns (path, temp_dir) tuple. temp_dir is set if the source was downloaded
+    and should be cleaned up after use.
     """
     # Check if it's a URL
     if source.startswith(("http://", "https://")):
-        return download_yaml(source), True
+        return download_yaml(source)
 
     # It's a local file path
     path = Path(source)
     if not path.exists():
         raise click.ClickException(f"File not found: {source}")
-    return path.resolve(), False
+    return path.resolve(), None
 
 
-def download_yaml(url: str) -> Path:
-    """Download YAML from a URL and save to a temporary file."""
+def download_yaml(url: str) -> tuple[Path, Path]:
+    """Download YAML from a URL and save to a temporary directory.
+
+    Returns (yaml_path, temp_dir) tuple. The temp_dir should be cleaned up after use.
+    """
     # Convert GitHub blob URLs to raw URLs
     url = convert_to_raw_url(url)
 
@@ -203,11 +207,12 @@ def download_yaml(url: str) -> Path:
     if not filename.endswith((".yaml", ".yml")):
         filename = "config.yaml"
 
-    # Save to temp file in current directory (so .esphome is created here)
-    yaml_file = Path.cwd() / filename
+    # Create temp directory for YAML and .esphome cache
+    temp_dir = Path(tempfile.mkdtemp(prefix="ewt-"))
+    yaml_file = temp_dir / filename
     yaml_file.write_text(content)
 
-    return yaml_file
+    return yaml_file, temp_dir
 
 
 def convert_to_raw_url(url: str) -> str:
