@@ -56,6 +56,7 @@ jobs:
             https://github.com/esphome/firmware/blob/main/esphome-web/esp32s2.factory.yaml \
             https://github.com/esphome/firmware/blob/main/esphome-web/esp32s3.factory.yaml \
             https://github.com/esphome/firmware/blob/main/esphome-web/esp8266.factory.yaml \
+            --title "ewt-gen" \
             --publish-url "${{ steps.version.outputs.publish_url }}" \
             --fw-version "${{ steps.version.outputs.version }}" \
             -o _site/
