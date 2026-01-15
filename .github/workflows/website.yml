@@ -26,6 +26,27 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
+      - name: Determine version and publish URL
+        id: version
+        run: |
+          # Get latest stable tag (exclude pre-releases with a/b suffix)
+          LATEST_TAG=$(git tag --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || echo "")
+
+          if [ -z "$LATEST_TAG" ]; then
+            VERSION="dev"
+          else
+            VERSION="$LATEST_TAG"
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using version: $VERSION"
+
+          # Construct GitHub Pages URL
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          PUBLISH_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}"
+          echo "publish_url=$PUBLISH_URL" >> $GITHUB_OUTPUT
+          echo "Publish URL: $PUBLISH_URL"
+
       - name: Build ESPHome Web firmware site
         run: |
           uv run ewt-gen \
@@ -35,6 +56,8 @@ jobs:
             https://github.com/esphome/firmware/blob/main/esphome-web/esp32s2.factory.yaml \
             https://github.com/esphome/firmware/blob/main/esphome-web/esp32s3.factory.yaml \
             https://github.com/esphome/firmware/blob/main/esphome-web/esp8266.factory.yaml \
+            --publish-url "${{ steps.version.outputs.publish_url }}" \
+            --fw-version "${{ steps.version.outputs.version }}" \
             -o _site/
 
       - name: Upload artifact
