@@ -38,8 +38,12 @@ def generate_site(
         firmware_file = build["firmware"]
         chip_family = build["chip_family"]
 
-        # Copy firmware with chip-specific name
-        firmware_filename = f"firmware-{chip_family.lower().replace('-', '')}.bin"
+        # Copy firmware with chip-specific name (including version if available)
+        chip_id = chip_family.lower().replace('-', '')
+        if version:
+            firmware_filename = f"firmware-{chip_id}-{version}.bin"
+        else:
+            firmware_filename = f"firmware-{chip_id}.bin"
         firmware_dest = output_dir / firmware_filename
         shutil.copy(firmware_file, firmware_dest)
 
@@ -60,7 +64,7 @@ def generate_site(
         # Collect tab data
         tab_data.append({
             "chip_family": chip_family,
-            "chip_id": chip_family.lower().replace("-", ""),
+            "chip_id": chip_id,
             "firmware_filename": firmware_filename,
             "yaml_filename": yaml_file.name,
             "yaml_content": html.escape(yaml_file.read_text()),
