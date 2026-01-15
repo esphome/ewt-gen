@@ -397,6 +397,8 @@ def detect_chip_family(config: dict) -> str | None:
         if variant:
             if variant in ("ESP32C3", "ESP32-C3"):
                 return "ESP32-C3"
+            if variant in ("ESP32C6", "ESP32-C6"):
+                return "ESP32-C6"
             if variant in ("ESP32S2", "ESP32-S2"):
                 return "ESP32-S2"
             if variant in ("ESP32S3", "ESP32-S3"):
@@ -406,6 +408,8 @@ def detect_chip_family(config: dict) -> str | None:
         board_lower = board.lower()
         if "c3" in board_lower:
             return "ESP32-C3"
+        if "c6" in board_lower:
+            return "ESP32-C6"
         if "s2" in board_lower:
             return "ESP32-S2"
         if "s3" in board_lower:
@@ -426,6 +430,8 @@ def normalize_chip_family(chip_family: str) -> str:
         "esp32": "ESP32",
         "esp32c3": "ESP32-C3",
         "esp32-c3": "ESP32-C3",
+        "esp32c6": "ESP32-C6",
+        "esp32-c6": "ESP32-C6",
         "esp32s2": "ESP32-S2",
         "esp32-s2": "ESP32-S2",
         "esp32s3": "ESP32-S3",
