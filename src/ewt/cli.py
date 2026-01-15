@@ -151,6 +151,7 @@ def main(
                 publish_url=publish_url,
                 package_import_url=package_import_url,
                 version=config_version,
+                chip_family=chip_family,
             )
             if config_version:
                 click.echo(f"Added OTA update support for {yaml_file.name}")
@@ -461,6 +462,7 @@ def create_factory_yaml(
     publish_url: str,
     package_import_url: str | None,
     version: str | None,
+    chip_family: str | None = None,
 ) -> Path:
     """Create a factory YAML that imports the original and adds OTA support.
 
@@ -500,6 +502,10 @@ update:
 
 http_request:
 """.format(version=version, manifest_url=manifest_url)
+
+        # ESP8266 requires verify_ssl: false due to limited SSL capabilities
+        if chip_family and chip_family.upper() == "ESP8266":
+            factory_content += "  verify_ssl: false\n"
 
     if package_import_url:
         factory_content += """
