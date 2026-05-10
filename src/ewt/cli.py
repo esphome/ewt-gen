@@ -177,7 +177,9 @@ def main(
         if firmware is None:
             raise click.ClickException(
                 f"Could not find firmware binary for {yaml_file.name}.\n"
-                f"Looked for: {yaml_file.stem}.bin, .esphome/build/{device_name}/.pioenvs/*/firmware.bin"
+                f"Looked for: {yaml_file.stem}.factory.bin, {yaml_file.stem}.bin, "
+                f".esphome/build/{device_name}/.pioenvs/*/firmware-factory.bin, "
+                f".esphome/build/{device_name}/.pioenvs/*/firmware.bin"
             )
 
         builds.append({
@@ -391,10 +393,17 @@ def compile_with_esphome(
 
 
 def find_firmware(yaml_file: Path, project_name: str) -> Path | None:
-    """Try to find the firmware binary for the given YAML file."""
+    """Try to find the firmware binary for the given YAML file.
+
+    Prefers the factory image (bootloader + partition table + app, flashable at
+    offset 0x0) over the OTA app-only image, since ESP Web Tools flashes at 0x0.
+    """
     yaml_dir = yaml_file.parent
 
-    # Try same name with .bin extension
+    # Try same name with .bin extension (prefer .factory.bin)
+    factory_bin = yaml_dir / f"{yaml_file.stem}.factory.bin"
+    if factory_bin.exists():
+        return factory_bin
     bin_file = yaml_dir / f"{yaml_file.stem}.bin"
     if bin_file.exists():
         return bin_file
@@ -402,9 +411,11 @@ def find_firmware(yaml_file: Path, project_name: str) -> Path | None:
     # Try ESPHome build directory
     esphome_build_dir = yaml_dir / ".esphome" / "build" / project_name / ".pioenvs"
     if esphome_build_dir.exists():
-        # Look for firmware.bin in any subdirectory
         for subdir in esphome_build_dir.iterdir():
             if subdir.is_dir():
+                factory = subdir / "firmware-factory.bin"
+                if factory.exists():
+                    return factory
                 fw = subdir / "firmware.bin"
                 if fw.exists():
                     return fw
