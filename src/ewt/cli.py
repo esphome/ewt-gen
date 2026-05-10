@@ -39,6 +39,11 @@ from ewt.generator import generate_site
     help="Use pre-release ESPHome version (uvx only, forces refresh).",
 )
 @click.option(
+    "--dev",
+    is_flag=True,
+    help="Use ESPHome dev branch from GitHub (uvx only, forces refresh).",
+)
+@click.option(
     "--publish-url",
     help="URL where the firmware will be published. Adds OTA updates and dashboard import.",
 )
@@ -53,6 +58,7 @@ def main(
     output: Path | None,
     title: str | None,
     pre_release: bool,
+    dev: bool,
     publish_url: str | None,
     fw_version: str | None,
 ):
@@ -62,6 +68,9 @@ def main(
     When multiple configs are provided, they must have the same esphome.project.name
     and no overlapping chip families.
     """
+    if pre_release and dev:
+        raise click.UsageError("--pre-release and --dev are mutually exclusive.")
+
     # Process all YAML sources and collect build info
     builds: list[dict] = []
     temp_dirs: list[Path] = []
@@ -161,7 +170,7 @@ def main(
         # Compile with ESPHome if needed
         if not skip_compile:
             click.echo(f"Compiling {compile_yaml_file.name} with ESPHome...")
-            compile_with_esphome(compile_yaml_file, pre_release=pre_release)
+            compile_with_esphome(compile_yaml_file, pre_release=pre_release, dev=dev)
 
         # Find firmware binary
         firmware = find_firmware(yaml_file, device_name)
@@ -333,12 +342,29 @@ def convert_to_raw_url(url: str) -> str:
     return url
 
 
-def compile_with_esphome(yaml_file: Path, *, pre_release: bool = False) -> None:
+def compile_with_esphome(
+    yaml_file: Path, *, pre_release: bool = False, dev: bool = False
+) -> None:
     """Compile the ESPHome configuration."""
     cwd = yaml_file.parent
 
+    # If dev requested, install ESPHome from the dev branch via uvx
+    if dev:
+        if not shutil.which("uvx"):
+            raise click.ClickException(
+                "uvx not found. Please install uv to use --dev."
+            )
+        cmd = [
+            "uvx",
+            "--refresh",
+            "--from",
+            "git+https://github.com/esphome/esphome.git@dev",
+            "esphome",
+            "compile",
+            str(yaml_file),
+        ]
     # If pre-release requested, must use uvx
-    if pre_release:
+    elif pre_release:
         if not shutil.which("uvx"):
             raise click.ClickException(
                 "uvx not found. Please install uv to use --pre-release."
