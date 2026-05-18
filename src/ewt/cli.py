@@ -424,11 +424,7 @@ def resolve_esphome_config(
 ) -> dict:
     """Resolve an ESPHome config via ``esphome config``.
 
-    Runs only ESPHome's config-resolution phase (no compilation), which
-    expands ``packages:``, ``substitutions:`` and ``!include``/``!secret``
-    references and prints the fully-merged YAML. Uses the same ESPHome
-    invocation as compilation (local install or uvx). Raises a
-    ``ClickException`` if ESPHome is unavailable or resolution fails.
+    Raises a ``ClickException`` if ESPHome is unavailable or resolution fails.
     """
     cmd = _esphome_command(pre_release=pre_release, dev=dev)
     cmd += ["config", str(yaml_file)]
@@ -441,8 +437,6 @@ def resolve_esphome_config(
             f"ESPHome failed to resolve {yaml_file.name}:\n{result.stderr.strip()}"
         )
 
-    # ESPHome disables ANSI color automatically when stdout is not a TTY,
-    # so the captured output is plain YAML.
     try:
         resolved = load_esphome_yaml(result.stdout)
     except yaml.YAMLError as exc:
@@ -457,11 +451,7 @@ def resolve_esphome_config(
 
 
 def detect_chip_family(config: dict) -> str | None:
-    """Try to detect chip family from an ESPHome config.
-
-    Inspects the root ``esp32``/``esp8266`` section. Pass a config resolved by
-    :func:`resolve_esphome_config` so package-defined platforms are expanded.
-    """
+    """Try to detect chip family from an ESPHome config."""
     # Check for esp32 platform
     if "esp32" in config:
         esp32_config = config["esp32"] or {}
