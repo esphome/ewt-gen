@@ -109,7 +109,7 @@ def main(
             project_names.add(esphome_project_name)
 
         # Determine chip family
-        chip_family = detect_chip_family(config)
+        chip_family = detect_chip_family(config, yaml_file.parent)
         if chip_family is None:
             raise click.ClickException(
                 f"Could not detect chip family from {yaml_file.name}."
@@ -415,13 +415,25 @@ def find_firmware(yaml_file: Path, project_name: str) -> Path | None:
     return None
 
 
-def detect_chip_family(config: dict) -> str | None:
-    """Try to detect chip family from ESPHome config."""
+def detect_chip_family(
+    config: dict,
+    base_dir: Path | None = None,
+    _seen: set[Path] | None = None,
+) -> str | None:
+    """Try to detect chip family from an ESPHome config.
+
+    The platform section (``esp32``/``esp8266``) is often defined in a
+    package rather than the root config, so this also searches ``packages:``
+    entries, loading local ``!include`` files relative to ``base_dir``.
+    """
+    if _seen is None:
+        _seen = set()
+
     # Check for esp32 platform
     if "esp32" in config:
-        esp32_config = config["esp32"]
-        board = esp32_config.get("board", "")
-        variant = esp32_config.get("variant", "").upper()
+        esp32_config = config["esp32"] or {}
+        board = esp32_config.get("board", "") or ""
+        variant = (esp32_config.get("variant", "") or "").upper()
 
         # Check variant first
         if variant:
@@ -451,7 +463,79 @@ def detect_chip_family(config: dict) -> str | None:
     if "esp8266" in config:
         return "ESP8266"
 
+    # Not found at the root - search ESPHome packages (inline configs and
+    # local !include files).
+    for pkg_config, pkg_dir in _resolve_packages(config.get("packages"), base_dir, _seen):
+        result = detect_chip_family(pkg_config, pkg_dir, _seen)
+        if result:
+            return result
+
     return None
+
+
+def _resolve_packages(
+    packages, base_dir: Path | None, seen: set[Path]
+):
+    """Yield (config, base_dir) pairs for each resolvable ESPHome package.
+
+    Packages may be a mapping (name -> spec) or a list of specs. Each spec is
+    either an inline config dict, a local ``!include`` filename, or an
+    ``!include`` mapping with a ``file`` key. Remote packages (github://, URLs)
+    are skipped since they cannot be resolved without network access.
+    """
+    if isinstance(packages, dict):
+        specs = list(packages.values())
+    elif isinstance(packages, list):
+        specs = list(packages)
+    else:
+        return
+
+    for spec in specs:
+        if isinstance(spec, str):
+            loaded = _load_package_file(spec, base_dir, seen)
+            if loaded is not None:
+                yield loaded
+        elif isinstance(spec, dict):
+            include_file = spec.get("file")
+            if isinstance(include_file, str):
+                loaded = _load_package_file(include_file, base_dir, seen)
+                if loaded is not None:
+                    yield loaded
+            else:
+                # Inline package config.
+                yield spec, base_dir
+
+
+def _load_package_file(
+    filename: str, base_dir: Path | None, seen: set[Path]
+) -> tuple[dict, Path] | None:
+    """Load a local ``!include`` package file relative to ``base_dir``.
+
+    Returns (config, file_dir) or None if the file is remote, missing, already
+    visited, or not a YAML mapping.
+    """
+    if filename.startswith(("github://", "http://", "https://")):
+        return None
+    if base_dir is None:
+        return None
+
+    path = (base_dir / filename).resolve()
+    if path in seen:
+        return None
+    seen.add(path)
+
+    if not path.is_file():
+        return None
+
+    try:
+        with open(path) as f:
+            loaded = load_esphome_yaml(f)
+    except (OSError, yaml.YAMLError):
+        return None
+
+    if not isinstance(loaded, dict):
+        return None
+    return loaded, path.parent
 
 
 def normalize_chip_family(chip_family: str) -> str:
