@@ -114,7 +114,7 @@ def main(
         resolved = resolve_esphome_config(
             yaml_file, pre_release=pre_release, dev=dev
         )
-        chip_family = detect_chip_family(resolved if resolved is not None else config)
+        chip_family = detect_chip_family(resolved)
         if chip_family is None:
             raise click.ClickException(
                 f"Could not detect chip family from {yaml_file.name}."
@@ -423,33 +423,39 @@ def find_firmware(yaml_file: Path, project_name: str) -> Path | None:
 
 def resolve_esphome_config(
     yaml_file: Path, *, pre_release: bool = False, dev: bool = False
-) -> dict | None:
+) -> dict:
     """Resolve an ESPHome config via ``esphome config``.
 
     Runs only ESPHome's config-resolution phase (no compilation), which
     expands ``packages:``, ``substitutions:`` and ``!include``/``!secret``
-    references and prints the fully-merged YAML. Returns the parsed config,
-    or None if ESPHome is unavailable or resolution fails.
+    references and prints the fully-merged YAML. Uses the same ESPHome
+    invocation as compilation (local install or uvx). Raises a
+    ``ClickException`` if ESPHome is unavailable or resolution fails.
     """
-    try:
-        cmd = _esphome_command(pre_release=pre_release, dev=dev)
-    except click.ClickException:
-        return None
+    cmd = _esphome_command(pre_release=pre_release, dev=dev)
     cmd += ["config", str(yaml_file)]
 
     result = subprocess.run(
         cmd, cwd=yaml_file.parent, capture_output=True, text=True
     )
     if result.returncode != 0:
-        return None
+        raise click.ClickException(
+            f"ESPHome failed to resolve {yaml_file.name}:\n{result.stderr.strip()}"
+        )
 
     # `esphome config` may colorize its output; strip ANSI codes before parsing.
     clean = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
     try:
         resolved = load_esphome_yaml(clean)
-    except yaml.YAMLError:
-        return None
-    return resolved if isinstance(resolved, dict) else None
+    except yaml.YAMLError as exc:
+        raise click.ClickException(
+            f"Could not parse resolved config for {yaml_file.name}: {exc}"
+        ) from exc
+    if not isinstance(resolved, dict):
+        raise click.ClickException(
+            f"ESPHome returned an unexpected config for {yaml_file.name}."
+        )
+    return resolved
 
 
 def detect_chip_family(config: dict) -> str | None:
