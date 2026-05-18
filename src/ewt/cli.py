@@ -454,9 +454,9 @@ def detect_chip_family(config: dict) -> str | None:
     """Try to detect chip family from an ESPHome config."""
     # Check for esp32 platform
     if "esp32" in config:
-        esp32_config = config["esp32"] or {}
-        board = esp32_config.get("board", "") or ""
-        variant = (esp32_config.get("variant", "") or "").upper()
+        esp32_config = config["esp32"]
+        board = esp32_config.get("board", "")
+        variant = esp32_config.get("variant", "").upper()
 
         # Check variant first
         if variant:
