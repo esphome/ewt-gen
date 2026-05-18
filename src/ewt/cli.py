@@ -108,8 +108,12 @@ def main(
         if esphome_project_name:
             project_names.add(esphome_project_name)
 
-        # Determine chip family
-        chip_family = detect_chip_family(config)
+        # Determine chip family.
+        click.echo(f"Resolving {yaml_file.name} with ESPHome...")
+        resolved = resolve_esphome_config(
+            yaml_file, pre_release=pre_release, dev=dev
+        )
+        chip_family = detect_chip_family(resolved)
         if chip_family is None:
             raise click.ClickException(
                 f"Could not detect chip family from {yaml_file.name}."
@@ -343,48 +347,48 @@ def convert_to_raw_url(url: str) -> str:
     return url
 
 
-def compile_with_esphome(
-    yaml_file: Path, *, pre_release: bool = False, dev: bool = False
-) -> None:
-    """Compile the ESPHome configuration."""
-    cwd = yaml_file.parent
-
+def _esphome_command(*, pre_release: bool = False, dev: bool = False) -> list[str]:
+    """Build the ESPHome invocation prefix (local install or uvx wrapper)."""
     # If dev requested, install ESPHome from the dev branch via uvx
     if dev:
         if not shutil.which("uvx"):
             raise click.ClickException(
                 "uvx not found. Please install uv to use --dev."
             )
-        cmd = [
+        return [
             "uvx",
             "--refresh",
             "--from",
             "git+https://github.com/esphome/esphome.git@dev",
             "esphome",
-            "compile",
-            str(yaml_file),
         ]
     # If pre-release requested, must use uvx
-    elif pre_release:
+    if pre_release:
         if not shutil.which("uvx"):
             raise click.ClickException(
                 "uvx not found. Please install uv to use --pre-release."
             )
-        cmd = ["uvx", "--prerelease", "allow", "--refresh", "esphome", "compile", str(yaml_file)]
-    else:
-        # Try local esphome first, fall back to uvx
-        if shutil.which("esphome"):
-            cmd = ["esphome", "compile", str(yaml_file)]
-        elif shutil.which("uvx"):
-            cmd = ["uvx", "esphome", "compile", str(yaml_file)]
-        else:
-            raise click.ClickException(
-                "ESPHome not found. Please install ESPHome or uv:\n"
-                "  pip install esphome\n"
-                "Or use --skip-compile with --firmware to provide a pre-built binary."
-            )
+        return ["uvx", "--prerelease", "allow", "--refresh", "esphome"]
+    # Try local esphome first, fall back to uvx
+    if shutil.which("esphome"):
+        return ["esphome"]
+    if shutil.which("uvx"):
+        return ["uvx", "esphome"]
+    raise click.ClickException(
+        "ESPHome not found. Please install ESPHome or uv:\n"
+        "  pip install esphome"
+    )
 
-    result = subprocess.run(cmd, cwd=cwd)
+
+def compile_with_esphome(
+    yaml_file: Path, *, pre_release: bool = False, dev: bool = False
+) -> None:
+    """Compile the ESPHome configuration."""
+    cmd = _esphome_command(pre_release=pre_release, dev=dev) + [
+        "compile",
+        str(yaml_file),
+    ]
+    result = subprocess.run(cmd, cwd=yaml_file.parent)
     if result.returncode != 0:
         raise click.ClickException(
             f"ESPHome compilation failed with exit code {result.returncode}"
@@ -415,8 +419,39 @@ def find_firmware(yaml_file: Path, project_name: str) -> Path | None:
     return None
 
 
+def resolve_esphome_config(
+    yaml_file: Path, *, pre_release: bool = False, dev: bool = False
+) -> dict:
+    """Resolve an ESPHome config via ``esphome config``.
+
+    Raises a ``ClickException`` if ESPHome is unavailable or resolution fails.
+    """
+    cmd = _esphome_command(pre_release=pre_release, dev=dev)
+    cmd += ["config", str(yaml_file)]
+
+    result = subprocess.run(
+        cmd, cwd=yaml_file.parent, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        raise click.ClickException(
+            f"ESPHome failed to resolve {yaml_file.name}:\n{result.stderr.strip()}"
+        )
+
+    try:
+        resolved = load_esphome_yaml(result.stdout)
+    except yaml.YAMLError as exc:
+        raise click.ClickException(
+            f"Could not parse resolved config for {yaml_file.name}: {exc}"
+        ) from exc
+    if not isinstance(resolved, dict):
+        raise click.ClickException(
+            f"ESPHome returned an unexpected config for {yaml_file.name}."
+        )
+    return resolved
+
+
 def detect_chip_family(config: dict) -> str | None:
-    """Try to detect chip family from ESPHome config."""
+    """Try to detect chip family from an ESPHome config."""
     # Check for esp32 platform
     if "esp32" in config:
         esp32_config = config["esp32"]
