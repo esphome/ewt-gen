@@ -108,8 +108,7 @@ def main(
         if esphome_project_name:
             project_names.add(esphome_project_name)
 
-        # Determine chip family. Resolve the config with ESPHome first so the
-        # esp32/esp8266 section is expanded even when defined in a package.
+        # Determine chip family.
         click.echo(f"Resolving {yaml_file.name} with ESPHome...")
         resolved = resolve_esphome_config(
             yaml_file, pre_release=pre_release, dev=dev
@@ -377,8 +376,7 @@ def _esphome_command(*, pre_release: bool = False, dev: bool = False) -> list[st
         return ["uvx", "esphome"]
     raise click.ClickException(
         "ESPHome not found. Please install ESPHome or uv:\n"
-        "  pip install esphome\n"
-        "Or use --skip-compile with --firmware to provide a pre-built binary."
+        "  pip install esphome"
     )
 
 
@@ -443,10 +441,10 @@ def resolve_esphome_config(
             f"ESPHome failed to resolve {yaml_file.name}:\n{result.stderr.strip()}"
         )
 
-    # `esphome config` may colorize its output; strip ANSI codes before parsing.
-    clean = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    # ESPHome disables ANSI color automatically when stdout is not a TTY,
+    # so the captured output is plain YAML.
     try:
-        resolved = load_esphome_yaml(clean)
+        resolved = load_esphome_yaml(result.stdout)
     except yaml.YAMLError as exc:
         raise click.ClickException(
             f"Could not parse resolved config for {yaml_file.name}: {exc}"
