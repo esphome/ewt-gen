@@ -108,19 +108,13 @@ def main(
         if esphome_project_name:
             project_names.add(esphome_project_name)
 
-        # Determine chip family
-        chip_family = detect_chip_family(config)
-        if chip_family is None:
-            # The esp32/esp8266 section may be defined in a package; have
-            # ESPHome resolve packages, substitutions and includes, then retry.
-            click.echo(
-                f"Resolving {yaml_file.name} with ESPHome to detect chip family..."
-            )
-            resolved = resolve_esphome_config(
-                yaml_file, pre_release=pre_release, dev=dev
-            )
-            if resolved is not None:
-                chip_family = detect_chip_family(resolved)
+        # Determine chip family. Resolve the config with ESPHome first so the
+        # esp32/esp8266 section is expanded even when defined in a package.
+        click.echo(f"Resolving {yaml_file.name} with ESPHome...")
+        resolved = resolve_esphome_config(
+            yaml_file, pre_release=pre_release, dev=dev
+        )
+        chip_family = detect_chip_family(resolved if resolved is not None else config)
         if chip_family is None:
             raise click.ClickException(
                 f"Could not detect chip family from {yaml_file.name}."
@@ -461,9 +455,8 @@ def resolve_esphome_config(
 def detect_chip_family(config: dict) -> str | None:
     """Try to detect chip family from an ESPHome config.
 
-    Only inspects the root config; if the ``esp32``/``esp8266`` platform
-    section is defined in a package, resolve the config with
-    :func:`resolve_esphome_config` first.
+    Inspects the root ``esp32``/``esp8266`` section. Pass a config resolved by
+    :func:`resolve_esphome_config` so package-defined platforms are expanded.
     """
     # Check for esp32 platform
     if "esp32" in config:
