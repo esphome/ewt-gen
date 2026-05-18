@@ -109,7 +109,18 @@ def main(
             project_names.add(esphome_project_name)
 
         # Determine chip family
-        chip_family = detect_chip_family(config, yaml_file.parent)
+        chip_family = detect_chip_family(config)
+        if chip_family is None:
+            # The esp32/esp8266 section may be defined in a package; have
+            # ESPHome resolve packages, substitutions and includes, then retry.
+            click.echo(
+                f"Resolving {yaml_file.name} with ESPHome to detect chip family..."
+            )
+            resolved = resolve_esphome_config(
+                yaml_file, pre_release=pre_release, dev=dev
+            )
+            if resolved is not None:
+                chip_family = detect_chip_family(resolved)
         if chip_family is None:
             raise click.ClickException(
                 f"Could not detect chip family from {yaml_file.name}."
@@ -343,48 +354,49 @@ def convert_to_raw_url(url: str) -> str:
     return url
 
 
-def compile_with_esphome(
-    yaml_file: Path, *, pre_release: bool = False, dev: bool = False
-) -> None:
-    """Compile the ESPHome configuration."""
-    cwd = yaml_file.parent
-
+def _esphome_command(*, pre_release: bool = False, dev: bool = False) -> list[str]:
+    """Build the ESPHome invocation prefix (local install or uvx wrapper)."""
     # If dev requested, install ESPHome from the dev branch via uvx
     if dev:
         if not shutil.which("uvx"):
             raise click.ClickException(
                 "uvx not found. Please install uv to use --dev."
             )
-        cmd = [
+        return [
             "uvx",
             "--refresh",
             "--from",
             "git+https://github.com/esphome/esphome.git@dev",
             "esphome",
-            "compile",
-            str(yaml_file),
         ]
     # If pre-release requested, must use uvx
-    elif pre_release:
+    if pre_release:
         if not shutil.which("uvx"):
             raise click.ClickException(
                 "uvx not found. Please install uv to use --pre-release."
             )
-        cmd = ["uvx", "--prerelease", "allow", "--refresh", "esphome", "compile", str(yaml_file)]
-    else:
-        # Try local esphome first, fall back to uvx
-        if shutil.which("esphome"):
-            cmd = ["esphome", "compile", str(yaml_file)]
-        elif shutil.which("uvx"):
-            cmd = ["uvx", "esphome", "compile", str(yaml_file)]
-        else:
-            raise click.ClickException(
-                "ESPHome not found. Please install ESPHome or uv:\n"
-                "  pip install esphome\n"
-                "Or use --skip-compile with --firmware to provide a pre-built binary."
-            )
+        return ["uvx", "--prerelease", "allow", "--refresh", "esphome"]
+    # Try local esphome first, fall back to uvx
+    if shutil.which("esphome"):
+        return ["esphome"]
+    if shutil.which("uvx"):
+        return ["uvx", "esphome"]
+    raise click.ClickException(
+        "ESPHome not found. Please install ESPHome or uv:\n"
+        "  pip install esphome\n"
+        "Or use --skip-compile with --firmware to provide a pre-built binary."
+    )
 
-    result = subprocess.run(cmd, cwd=cwd)
+
+def compile_with_esphome(
+    yaml_file: Path, *, pre_release: bool = False, dev: bool = False
+) -> None:
+    """Compile the ESPHome configuration."""
+    cmd = _esphome_command(pre_release=pre_release, dev=dev) + [
+        "compile",
+        str(yaml_file),
+    ]
+    result = subprocess.run(cmd, cwd=yaml_file.parent)
     if result.returncode != 0:
         raise click.ClickException(
             f"ESPHome compilation failed with exit code {result.returncode}"
@@ -415,20 +427,44 @@ def find_firmware(yaml_file: Path, project_name: str) -> Path | None:
     return None
 
 
-def detect_chip_family(
-    config: dict,
-    base_dir: Path | None = None,
-    _seen: set[Path] | None = None,
-) -> str | None:
+def resolve_esphome_config(
+    yaml_file: Path, *, pre_release: bool = False, dev: bool = False
+) -> dict | None:
+    """Resolve an ESPHome config via ``esphome config``.
+
+    Runs only ESPHome's config-resolution phase (no compilation), which
+    expands ``packages:``, ``substitutions:`` and ``!include``/``!secret``
+    references and prints the fully-merged YAML. Returns the parsed config,
+    or None if ESPHome is unavailable or resolution fails.
+    """
+    try:
+        cmd = _esphome_command(pre_release=pre_release, dev=dev)
+    except click.ClickException:
+        return None
+    cmd += ["config", str(yaml_file)]
+
+    result = subprocess.run(
+        cmd, cwd=yaml_file.parent, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return None
+
+    # `esphome config` may colorize its output; strip ANSI codes before parsing.
+    clean = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    try:
+        resolved = load_esphome_yaml(clean)
+    except yaml.YAMLError:
+        return None
+    return resolved if isinstance(resolved, dict) else None
+
+
+def detect_chip_family(config: dict) -> str | None:
     """Try to detect chip family from an ESPHome config.
 
-    The platform section (``esp32``/``esp8266``) is often defined in a
-    package rather than the root config, so this also searches ``packages:``
-    entries, loading local ``!include`` files relative to ``base_dir``.
+    Only inspects the root config; if the ``esp32``/``esp8266`` platform
+    section is defined in a package, resolve the config with
+    :func:`resolve_esphome_config` first.
     """
-    if _seen is None:
-        _seen = set()
-
     # Check for esp32 platform
     if "esp32" in config:
         esp32_config = config["esp32"] or {}
@@ -463,79 +499,7 @@ def detect_chip_family(
     if "esp8266" in config:
         return "ESP8266"
 
-    # Not found at the root - search ESPHome packages (inline configs and
-    # local !include files).
-    for pkg_config, pkg_dir in _resolve_packages(config.get("packages"), base_dir, _seen):
-        result = detect_chip_family(pkg_config, pkg_dir, _seen)
-        if result:
-            return result
-
     return None
-
-
-def _resolve_packages(
-    packages, base_dir: Path | None, seen: set[Path]
-):
-    """Yield (config, base_dir) pairs for each resolvable ESPHome package.
-
-    Packages may be a mapping (name -> spec) or a list of specs. Each spec is
-    either an inline config dict, a local ``!include`` filename, or an
-    ``!include`` mapping with a ``file`` key. Remote packages (github://, URLs)
-    are skipped since they cannot be resolved without network access.
-    """
-    if isinstance(packages, dict):
-        specs = list(packages.values())
-    elif isinstance(packages, list):
-        specs = list(packages)
-    else:
-        return
-
-    for spec in specs:
-        if isinstance(spec, str):
-            loaded = _load_package_file(spec, base_dir, seen)
-            if loaded is not None:
-                yield loaded
-        elif isinstance(spec, dict):
-            include_file = spec.get("file")
-            if isinstance(include_file, str):
-                loaded = _load_package_file(include_file, base_dir, seen)
-                if loaded is not None:
-                    yield loaded
-            else:
-                # Inline package config.
-                yield spec, base_dir
-
-
-def _load_package_file(
-    filename: str, base_dir: Path | None, seen: set[Path]
-) -> tuple[dict, Path] | None:
-    """Load a local ``!include`` package file relative to ``base_dir``.
-
-    Returns (config, file_dir) or None if the file is remote, missing, already
-    visited, or not a YAML mapping.
-    """
-    if filename.startswith(("github://", "http://", "https://")):
-        return None
-    if base_dir is None:
-        return None
-
-    path = (base_dir / filename).resolve()
-    if path in seen:
-        return None
-    seen.add(path)
-
-    if not path.is_file():
-        return None
-
-    try:
-        with open(path) as f:
-            loaded = load_esphome_yaml(f)
-    except (OSError, yaml.YAMLError):
-        return None
-
-    if not isinstance(loaded, dict):
-        return None
-    return loaded, path.parent
 
 
 def normalize_chip_family(chip_family: str) -> str:
