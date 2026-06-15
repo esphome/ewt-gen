@@ -61,6 +61,8 @@ Options:
   --pre-release                   Use pre-release ESPHome version via uvx
   --publish-url TEXT              URL where firmware will be published (enables OTA)
   --fw-version TEXT               Firmware version (read from esphome.project.version if not specified)
+  --release-url TEXT              Release notes URL for the manifest OTA entry (auto-detected from the GitHub Actions trigger: release page or triggering commit)
+  --release-summary TEXT          Short release summary for the manifest OTA entry
   --help                          Show help
 ```
 
@@ -113,6 +115,34 @@ The version is required for OTA updates to work correctly. It can be specified v
 - `esphome.project.version` field in the YAML configuration
 
 If no version is found, a warning is shown and OTA components are omitted (dashboard import still works).
+
+When OTA is enabled, each `manifest.json` build also gets an `ota` entry that
+ESPHome's `update.http_request` platform uses to update already-running
+devices:
+
+```json
+{
+  "chipFamily": "ESP32-S3",
+  "parts": [{ "path": "firmware-esp32s3-2026.6.0.bin", "offset": 0 }],
+  "ota": {
+    "path": "firmware-esp32s3-2026.6.0.ota.bin",
+    "md5": "...",
+    "sha256": "...",
+    "summary": "ESPHome 2026.6.0",
+    "release_url": "https://github.com/owner/repo/releases/tag/2026.6.0"
+  }
+}
+```
+
+The OTA (app-only) image is copied alongside the factory image and its
+checksums are computed automatically. The optional `summary` and `release_url`
+fields, shown by the firmware update entity, are set with:
+
+- `--release-summary` - short text describing the release
+- `--release-url` - link to the release notes. When not specified and running in
+  GitHub Actions, this is auto-detected from the trigger: the release page for
+  `release` events, otherwise a link to the triggering commit (since not every
+  workflow publishes a GitHub Release)
 
 ## Generated Site
 

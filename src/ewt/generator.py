@@ -1,5 +1,6 @@
 """Static site generator for ESP Web Tools."""
 
+import hashlib
 import html
 import json
 import re
@@ -7,6 +8,17 @@ import shutil
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
+
+
+def _file_hashes(path: Path) -> tuple[str, str]:
+    """Return the (md5, sha256) hex digests of a file."""
+    md5 = hashlib.md5()
+    sha256 = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            md5.update(chunk)
+            sha256.update(chunk)
+    return md5.hexdigest(), sha256.hexdigest()
 
 
 def generate_site(
@@ -47,10 +59,34 @@ def generate_site(
         firmware_dest = output_dir / firmware_filename
         shutil.copy(firmware_file, firmware_dest)
 
-        manifest_builds.append({
+        manifest_build = {
             "chipFamily": chip_family,
             "parts": [{"path": firmware_filename, "offset": 0}],
-        })
+        }
+
+        # Add the OTA (app-only) image so ESPHome's update.http_request platform
+        # can perform over-the-air updates from this manifest.
+        ota_firmware_file = build.get("ota_firmware")
+        if ota_firmware_file:
+            if version:
+                ota_filename = f"firmware-{chip_id}-{version}.ota.bin"
+            else:
+                ota_filename = f"firmware-{chip_id}.ota.bin"
+            shutil.copy(ota_firmware_file, output_dir / ota_filename)
+
+            md5, sha256 = _file_hashes(ota_firmware_file)
+            ota_entry = {
+                "path": ota_filename,
+                "md5": md5,
+                "sha256": sha256,
+            }
+            if build.get("release_summary"):
+                ota_entry["summary"] = build["release_summary"]
+            if build.get("release_url"):
+                ota_entry["release_url"] = build["release_url"]
+            manifest_build["ota"] = ota_entry
+
+        manifest_builds.append(manifest_build)
 
         # Copy YAML files (avoid duplicates)
         if yaml_file.name not in yaml_files_copied:
