@@ -62,6 +62,19 @@ from ewt.generator import generate_site
     "fw_version",
     help="Firmware version. Read from esphome.project.version if not specified.",
 )
+@click.option(
+    "--release-url",
+    "release_url",
+    help=(
+        "URL of the release notes for this version, added to each manifest OTA "
+        "entry. Auto-detected from the GitHub Actions context when not specified."
+    ),
+)
+@click.option(
+    "--release-summary",
+    "release_summary",
+    help="Short summary shown by the firmware update entity, added to each manifest OTA entry.",
+)
 def main(
     yaml_sources: tuple[str, ...],
     skip_compile: bool,
@@ -72,6 +85,8 @@ def main(
     publish_url: str | None,
     import_url: str | None,
     fw_version: str | None,
+    release_url: str | None,
+    release_summary: str | None,
 ):
     """Generate a static website for firmware distribution.
 
@@ -139,18 +154,17 @@ def main(
             )
         chip_families_seen.add(chip_family)
 
+        # Resolve the firmware version for this config (CLI flag wins, else YAML).
+        config_version = fw_version
+        if config_version is None:
+            config_version = expand_substitutions(project_config.get("version", "")) or None
+
         # Store first config info for title/version/output defaults
         if first_config_info is None:
-            version = fw_version
-            if version is None:
-                version = expand_substitutions(project_config.get("version", ""))
-                if not version:
-                    version = None
-
             first_config_info = {
                 "device_name": device_name,
                 "friendly_name": expand_substitutions(esphome_config.get("friendly_name", "")),
-                "version": version,
+                "version": config_version,
                 "yaml_file": yaml_file,
                 "project_name": esphome_project_name,
             }
@@ -170,13 +184,6 @@ def main(
                 package_import_url = convert_to_esphome_github_url(yaml_source)
             if package_import_url is None:
                 package_import_url = github_actions_import_url(yaml_file)
-
-            # Get version for this config
-            config_version = fw_version
-            if config_version is None:
-                config_version = expand_substitutions(project_config.get("version", ""))
-                if not config_version:
-                    config_version = None
 
             compile_yaml_file = create_factory_yaml(
                 yaml_file=yaml_file,
@@ -204,12 +211,36 @@ def main(
                 f".esphome/build/{device_name}/.pioenvs/*/firmware.factory.bin"
             )
 
+        # Find the OTA (app-only) firmware for the manifest's OTA entry. This is
+        # what ESPHome's update.http_request platform downloads to update an
+        # already-running device, so it only matters when OTA is enabled
+        # (publish_url) and a version is available.
+        ota_firmware = None
+        build_release_url = None
+        if publish_url and config_version:
+            ota_firmware = find_ota_firmware(yaml_file, device_name)
+            if ota_firmware is None:
+                click.secho(
+                    f"Warning: Could not find OTA firmware binary for {yaml_file.name}. "
+                    "The manifest OTA entry will be omitted.",
+                    fg="yellow",
+                    err=True,
+                )
+            else:
+                ota_firmware = ota_firmware.resolve()
+                build_release_url = release_url or github_actions_release_url(
+                    config_version
+                )
+
         builds.append({
             "yaml_file": yaml_file,
             "compile_yaml_file": compile_yaml_file,
             "firmware": firmware.resolve(),
             "chip_family": chip_family,
             "yaml_source": yaml_source,
+            "ota_firmware": ota_firmware,
+            "release_url": build_release_url,
+            "release_summary": release_summary,
         })
 
     # Validate project names when multiple configs
@@ -438,6 +469,30 @@ def find_firmware(yaml_file: Path, project_name: str) -> Path | None:
     return None
 
 
+def find_ota_firmware(yaml_file: Path, project_name: str) -> Path | None:
+    """Find the OTA (app-only) firmware binary for the given YAML file.
+
+    This is the image consumed by ESPHome's ``update.http_request`` platform to
+    update an already-running device over the air, as opposed to the factory
+    image flashed at offset 0x0 by ESP Web Tools.
+    """
+    yaml_dir = yaml_file.parent
+
+    ota_bin = yaml_dir / f"{yaml_file.stem}.ota.bin"
+    if ota_bin.exists():
+        return ota_bin
+
+    esphome_build_dir = yaml_dir / ".esphome" / "build" / project_name / ".pioenvs"
+    if esphome_build_dir.exists():
+        for subdir in esphome_build_dir.iterdir():
+            if subdir.is_dir():
+                ota = subdir / "firmware.ota.bin"
+                if ota.exists():
+                    return ota
+
+    return None
+
+
 def resolve_esphome_config(
     yaml_file: Path, *, pre_release: bool = False, dev: bool = False
 ) -> dict:
@@ -566,6 +621,23 @@ def github_actions_import_url(yaml_file: Path) -> str | None:
         # Config isn't inside the checked-out repository.
         return None
     return f"github://{repository}/{rel_path.as_posix()}@{ref}"
+
+
+def github_actions_release_url(version: str | None) -> str | None:
+    """Derive the GitHub release URL for ``version`` from the Actions context.
+
+    When ewt-gen runs inside a GitHub Actions workflow the repository is exposed
+    as ``GITHUB_REPOSITORY``. ESPHome publishing workflows tag releases with the
+    firmware version, so ``<server>/<owner>/<repo>/releases/tag/<version>`` is the
+    release notes URL surfaced by the firmware update entity.
+
+    Returns None when not running in GitHub Actions or when no version is known.
+    """
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    if not (repository and version):
+        return None
+    return f"{server.rstrip('/')}/{repository}/releases/tag/{version}"
 
 
 def create_factory_yaml(
