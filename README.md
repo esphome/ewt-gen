@@ -91,7 +91,7 @@ ewt-gen my-device.yaml --publish-url https://firmware.example.com/my-device --fw
 When using `--publish-url`, the tool generates a factory firmware that includes:
 
 - **OTA updates via HTTP** - Devices can check for and install firmware updates
-- **Dashboard import** - Users can adopt the device in ESPHome Dashboard (if source is a GitHub URL)
+- **Dashboard import** - Users can adopt the device ("Take Control") in ESPHome Dashboard. The import URL points to the original config published alongside the firmware (or the GitHub source, when the config comes from one)
 
 The tool creates two YAML files in the output:
 - `{name}.yaml` - The original configuration (for users to customize)

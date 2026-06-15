@@ -152,6 +152,12 @@ def main(
             if yaml_source.startswith(("http://", "https://")):
                 package_import_url = convert_to_esphome_github_url(yaml_source)
 
+            # Fall back to the config published alongside the firmware so the
+            # device can always be adopted ("Take Control") from the ESPHome
+            # dashboard, even when the source isn't a GitHub URL.
+            if package_import_url is None:
+                package_import_url = f"{publish_url.rstrip('/')}/{yaml_file.name}"
+
             # Get version for this config
             config_version = fw_version
             if config_version is None:
