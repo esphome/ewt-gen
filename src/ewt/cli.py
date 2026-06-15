@@ -1,5 +1,6 @@
 """CLI interface for EWT."""
 
+import os
 import re
 import shutil
 import subprocess
@@ -48,6 +49,15 @@ from ewt.generator import generate_site
     help="URL where the firmware will be published. Adds OTA updates and dashboard import.",
 )
 @click.option(
+    "--import-url",
+    "import_url",
+    help=(
+        "ESPHome dashboard import URL in github:// shorthand "
+        "(e.g. github://user/repo/config.yaml@main). Auto-detected from the "
+        "GitHub source or GitHub Actions context when not specified."
+    ),
+)
+@click.option(
     "--fw-version",
     "fw_version",
     help="Firmware version. Read from esphome.project.version if not specified.",
@@ -60,6 +70,7 @@ def main(
     pre_release: bool,
     dev: bool,
     publish_url: str | None,
+    import_url: str | None,
     fw_version: str | None,
 ):
     """Generate a static website for firmware distribution.
@@ -147,10 +158,18 @@ def main(
         # If publish_url is provided, create a modified YAML with OTA components
         compile_yaml_file = yaml_file
         if publish_url:
-            # Convert source URL to github:// format for dashboard_import
-            package_import_url = None
-            if yaml_source.startswith(("http://", "https://")):
+            # dashboard_import ("Take Control") requires an ESPHome git
+            # shorthand (github://owner/repo/path@ref). A plain published URL
+            # is rejected by ESPHome, so we derive the shorthand from, in order:
+            # an explicit --import-url, a GitHub source URL, or — when generated
+            # by a GitHub Actions workflow — the repository context.
+            package_import_url = import_url
+            if package_import_url is None and yaml_source.startswith(
+                ("http://", "https://")
+            ):
                 package_import_url = convert_to_esphome_github_url(yaml_source)
+            if package_import_url is None:
+                package_import_url = github_actions_import_url(yaml_file)
 
             # Get version for this config
             config_version = fw_version
@@ -519,6 +538,34 @@ def convert_to_esphome_github_url(url: str) -> str | None:
         user, repo, branch, path = github_blob.groups()
         return f"github://{user}/{repo}/{path}@{branch}"
     return None
+
+
+def github_actions_import_url(yaml_file: Path) -> str | None:
+    """Derive an ESPHome github:// import URL from the GitHub Actions context.
+
+    When ewt-gen runs inside a GitHub Actions workflow the repository, ref and
+    the config's location within the checkout are available as environment
+    variables. This builds the ``github://owner/repo/path@ref`` shorthand that
+    ESPHome's dashboard_import requires (a plain published URL is not accepted).
+
+    Returns None when not running in GitHub Actions, when the server is not
+    github.com, or when the config lives outside the checked-out repository.
+    """
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    workspace = os.environ.get("GITHUB_WORKSPACE")
+    ref = os.environ.get("GITHUB_REF_NAME")
+    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    if not (repository and workspace and ref):
+        return None
+    # ESPHome's github:// shorthand only maps to github.com.
+    if server.rstrip("/") != "https://github.com":
+        return None
+    try:
+        rel_path = yaml_file.resolve().relative_to(Path(workspace).resolve())
+    except ValueError:
+        # Config isn't inside the checked-out repository.
+        return None
+    return f"github://{repository}/{rel_path.as_posix()}@{ref}"
 
 
 def create_factory_yaml(
