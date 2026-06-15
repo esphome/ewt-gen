@@ -61,7 +61,7 @@ Options:
   --pre-release                   Use pre-release ESPHome version via uvx
   --publish-url TEXT              URL where firmware will be published (enables OTA)
   --fw-version TEXT               Firmware version (read from esphome.project.version if not specified)
-  --release-url TEXT              Release notes URL for the manifest OTA entry (auto-detected in GitHub Actions)
+  --release-url TEXT              Release notes URL for the manifest OTA entry (auto-detected from the GitHub Actions trigger: release page or triggering commit)
   --release-summary TEXT          Short release summary for the manifest OTA entry
   --help                          Show help
 ```
@@ -139,8 +139,10 @@ checksums are computed automatically. The optional `summary` and `release_url`
 fields, shown by the firmware update entity, are set with:
 
 - `--release-summary` - short text describing the release
-- `--release-url` - link to the release notes (auto-detected from the GitHub
-  Actions context when not specified)
+- `--release-url` - link to the release notes. When not specified and running in
+  GitHub Actions, this is auto-detected from the trigger: the release page for
+  `release` events, otherwise a link to the triggering commit (since not every
+  workflow publishes a GitHub Release)
 
 ## Generated Site
 

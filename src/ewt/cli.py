@@ -228,9 +228,7 @@ def main(
                 )
             else:
                 ota_firmware = ota_firmware.resolve()
-                build_release_url = release_url or github_actions_release_url(
-                    config_version
-                )
+                build_release_url = release_url or github_actions_release_url()
 
         builds.append({
             "yaml_file": yaml_file,
@@ -623,21 +621,34 @@ def github_actions_import_url(yaml_file: Path) -> str | None:
     return f"github://{repository}/{rel_path.as_posix()}@{ref}"
 
 
-def github_actions_release_url(version: str | None) -> str | None:
-    """Derive the GitHub release URL for ``version`` from the Actions context.
+def github_actions_release_url() -> str | None:
+    """Derive a "what changed" URL from the GitHub Actions context.
 
-    When ewt-gen runs inside a GitHub Actions workflow the repository is exposed
-    as ``GITHUB_REPOSITORY``. ESPHome publishing workflows tag releases with the
-    firmware version, so ``<server>/<owner>/<repo>/releases/tag/<version>`` is the
-    release notes URL surfaced by the firmware update entity.
+    Surfaced by the firmware update entity as the release notes link. The right
+    target depends on what triggered the workflow, since not every project cuts a
+    GitHub Release — many publish on a plain push:
 
-    Returns None when not running in GitHub Actions or when no version is known.
+    - ``release`` events have a published notes page at the tag.
+    - Anything else (branch pushes, tag pushes without a Release, manual runs)
+      may not have a Release page, but the triggering commit always exists, so we
+      link to that instead.
+
+    Returns None when not running in GitHub Actions.
     """
     repository = os.environ.get("GITHUB_REPOSITORY")
-    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
-    if not (repository and version):
+    if not repository:
         return None
-    return f"{server.rstrip('/')}/{repository}/releases/tag/{version}"
+    base = f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com').rstrip('/')}/{repository}"
+
+    event = os.environ.get("GITHUB_EVENT_NAME")
+    ref_name = os.environ.get("GITHUB_REF_NAME")
+    if event == "release" and ref_name:
+        return f"{base}/releases/tag/{ref_name}"
+
+    sha = os.environ.get("GITHUB_SHA")
+    if sha:
+        return f"{base}/commit/{sha}"
+    return None
 
 
 def create_factory_yaml(
