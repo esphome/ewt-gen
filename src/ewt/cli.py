@@ -522,35 +522,43 @@ def resolve_esphome_config(
     return resolved
 
 
+# Known ESP32 variants, as (variant token, board substring, canonical family).
+# Order matters: more specific tokens must come before shorter ones they
+# contain (e.g. "c61" before "c6") so board-name matching picks the right one.
+# Keep this list in sync with the chipFamily values supported by ESP Web Tools.
+ESP32_VARIANTS = [
+    ("ESP32C61", "c61", "ESP32-C61"),
+    ("ESP32C6", "c6", "ESP32-C6"),
+    ("ESP32C5", "c5", "ESP32-C5"),
+    ("ESP32C3", "c3", "ESP32-C3"),
+    ("ESP32C2", "c2", "ESP32-C2"),
+    ("ESP32H2", "h2", "ESP32-H2"),
+    ("ESP32P4", "p4", "ESP32-P4"),
+    ("ESP32S2", "s2", "ESP32-S2"),
+    ("ESP32S3", "s3", "ESP32-S3"),
+]
+
+
 def detect_chip_family(config: dict) -> str | None:
     """Try to detect chip family from an ESPHome config."""
     # Check for esp32 platform
     if "esp32" in config:
         esp32_config = config["esp32"]
         board = esp32_config.get("board", "")
-        variant = esp32_config.get("variant", "").upper()
+        # Normalize the variant so "ESP32-P4" and "ESP32P4" both match.
+        variant = esp32_config.get("variant", "").upper().replace("-", "")
 
         # Check variant first
         if variant:
-            if variant in ("ESP32C3", "ESP32-C3"):
-                return "ESP32-C3"
-            if variant in ("ESP32C6", "ESP32-C6"):
-                return "ESP32-C6"
-            if variant in ("ESP32S2", "ESP32-S2"):
-                return "ESP32-S2"
-            if variant in ("ESP32S3", "ESP32-S3"):
-                return "ESP32-S3"
+            for token, _, canonical in ESP32_VARIANTS:
+                if variant == token:
+                    return canonical
 
-        # Check board names for variants
+        # Fall back to matching the board name for variants
         board_lower = board.lower()
-        if "c3" in board_lower:
-            return "ESP32-C3"
-        if "c6" in board_lower:
-            return "ESP32-C6"
-        if "s2" in board_lower:
-            return "ESP32-S2"
-        if "s3" in board_lower:
-            return "ESP32-S3"
+        for _, board_token, canonical in ESP32_VARIANTS:
+            if board_token in board_lower:
+                return canonical
 
         return "ESP32"
 
@@ -565,16 +573,11 @@ def normalize_chip_family(chip_family: str) -> str:
     """Normalize chip family string."""
     mapping = {
         "esp32": "ESP32",
-        "esp32c3": "ESP32-C3",
-        "esp32-c3": "ESP32-C3",
-        "esp32c6": "ESP32-C6",
-        "esp32-c6": "ESP32-C6",
-        "esp32s2": "ESP32-S2",
-        "esp32-s2": "ESP32-S2",
-        "esp32s3": "ESP32-S3",
-        "esp32-s3": "ESP32-S3",
         "esp8266": "ESP8266",
     }
+    for token, _, canonical in ESP32_VARIANTS:
+        mapping[token.lower()] = canonical
+        mapping[canonical.lower()] = canonical
     return mapping.get(chip_family.lower(), chip_family.upper())
 
 
