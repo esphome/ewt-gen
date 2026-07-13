@@ -208,6 +208,7 @@ def main(
             raise click.ClickException(
                 f"Could not find factory firmware binary for {yaml_file.name}.\n"
                 f"Looked for: {yaml_file.stem}.factory.bin, "
+                f".esphome/build/{device_name}/build/firmware.factory.bin, "
                 f".esphome/build/{device_name}/.pioenvs/*/firmware.factory.bin"
             )
 
@@ -443,6 +444,32 @@ def compile_with_esphome(
         )
 
 
+def _find_build_output(
+    yaml_dir: Path, project_name: str, filename: str
+) -> Path | None:
+    """Search ESPHome's build directories for a named output binary.
+
+    ESPHome's IDF-native build (2026.7 and newer) writes outputs to
+    ``.esphome/build/<name>/build/``; older PlatformIO-based builds used
+    ``.esphome/build/<name>/.pioenvs/<env>/``.
+    """
+    build_root = yaml_dir / ".esphome" / "build" / project_name
+
+    idf_output = build_root / "build" / filename
+    if idf_output.exists():
+        return idf_output
+
+    pioenvs_dir = build_root / ".pioenvs"
+    if pioenvs_dir.exists():
+        for subdir in pioenvs_dir.iterdir():
+            if subdir.is_dir():
+                output = subdir / filename
+                if output.exists():
+                    return output
+
+    return None
+
+
 def find_firmware(yaml_file: Path, project_name: str) -> Path | None:
     """Find the factory firmware binary for the given YAML file.
 
@@ -456,15 +483,7 @@ def find_firmware(yaml_file: Path, project_name: str) -> Path | None:
     if factory_bin.exists():
         return factory_bin
 
-    esphome_build_dir = yaml_dir / ".esphome" / "build" / project_name / ".pioenvs"
-    if esphome_build_dir.exists():
-        for subdir in esphome_build_dir.iterdir():
-            if subdir.is_dir():
-                factory = subdir / "firmware.factory.bin"
-                if factory.exists():
-                    return factory
-
-    return None
+    return _find_build_output(yaml_dir, project_name, "firmware.factory.bin")
 
 
 def find_ota_firmware(yaml_file: Path, project_name: str) -> Path | None:
@@ -480,15 +499,7 @@ def find_ota_firmware(yaml_file: Path, project_name: str) -> Path | None:
     if ota_bin.exists():
         return ota_bin
 
-    esphome_build_dir = yaml_dir / ".esphome" / "build" / project_name / ".pioenvs"
-    if esphome_build_dir.exists():
-        for subdir in esphome_build_dir.iterdir():
-            if subdir.is_dir():
-                ota = subdir / "firmware.ota.bin"
-                if ota.exists():
-                    return ota
-
-    return None
+    return _find_build_output(yaml_dir, project_name, "firmware.ota.bin")
 
 
 def resolve_esphome_config(
