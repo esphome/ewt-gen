@@ -744,35 +744,33 @@ http_request:
 # Install any available firmware update at boot: nudge the first update check
 # until it completes (update.check is a no-op while the network is down, e.g.
 # during first-boot provisioning), then act on its verdict exactly once.
-# Updates detected later are not installed until the next boot.
+# Nudges are capped at 30 so a permanently broken manifest cannot generate
+# unbounded load; a network that comes up later than that (or an update
+# published while the device is running) waits for the next boot.
+# Counter: >0 = nudges left, 0 = expired, -1 = boot install decision made.
 globals:
-  - id: boot_update_pending
-    type: bool
+  - id: ewt_boot_update_checks_left
+    type: int
     restore_value: no
-    initial_value: 'true'
+    initial_value: '30'
 
 interval:
   - interval: 60s
     then:
-      - if:
-          condition:
-            lambda: 'return id(boot_update_pending);'
-          then:
-            - if:
-                condition:
-                  lambda: 'return id(update_http_request).state != update::UPDATE_STATE_UNKNOWN;'
-                then:
-                  - globals.set:
-                      id: boot_update_pending
-                      value: 'false'
-                  - if:
-                      condition:
-                        update.is_available: update_http_request
-                      then:
-                        - update.perform:
-                            id: update_http_request
-                else:
-                  - update.check: update_http_request
+      - lambda: |-
+          if (id(ewt_boot_update_checks_left) < 0)
+            return;
+          auto *fw = id(update_http_request);
+          if (fw->state != update::UPDATE_STATE_UNKNOWN) {
+            id(ewt_boot_update_checks_left) = -1;
+            if (fw->state == update::UPDATE_STATE_AVAILABLE)
+              fw->perform(false);
+          } else if (id(ewt_boot_update_checks_left) > 0) {
+            id(ewt_boot_update_checks_left) -= 1;
+            fw->check();
+          } else {
+            id(ewt_boot_update_checks_left) = -1;
+          }
 """
 
     if package_import_url:

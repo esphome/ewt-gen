@@ -121,13 +121,17 @@ The version is required for OTA updates to work correctly. It can be specified v
 If no version is found, a warning is shown and OTA components are omitted (dashboard import still works).
 
 With `--update-on-boot`, the factory firmware installs any pending update at
-boot: it keeps nudging the first update check until one completes (covering
-networks that come up late, such as first-boot provisioning), then installs
-if that check found an update. The decision is made exactly once per boot —
-updates published while the device is running are reported to Home Assistant
-as usual but not installed until the next boot, and a failed install is not
-retried until then either. Devices adopted via dashboard import keep manual
-update control (the automation lives in the factory YAML only).
+boot: it nudges the first update check once per minute for up to 30 minutes
+(covering networks that come up late, such as first-boot provisioning), then
+installs if that check found an update. The decision is made exactly once per
+boot — updates published while the device is running are reported to Home
+Assistant as usual but not installed until the next boot, and a failed
+install is not retried until then either. Since updates install unattended,
+serve the manifest and firmware over HTTPS with a trusted certificate where
+the platform supports it (on ESP8266 the generated config sets
+`verify_ssl: false`, so transport integrity is all that protects the update
+path). Devices adopted via dashboard import keep manual update control (the
+automation lives in the factory YAML only).
 
 When OTA is enabled, each `manifest.json` build also gets an `ota` entry that
 ESPHome's `update.http_request` platform uses to update already-running
