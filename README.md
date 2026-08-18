@@ -63,6 +63,7 @@ Options:
   --fw-version TEXT               Firmware version (read from esphome.project.version if not specified)
   --release-url TEXT              Release notes URL for the manifest OTA entry (auto-detected from the GitHub Actions trigger: release page or triggering commit)
   --release-summary TEXT          Short release summary for the manifest OTA entry
+  --update-on-boot                Install any available firmware update at boot, once the first update check completes; requires --publish-url and a firmware version
   --help                          Show help
 ```
 
@@ -86,6 +87,9 @@ ewt-gen my-device.yaml --publish-url https://firmware.example.com/my-device
 
 # Specify version explicitly
 ewt-gen my-device.yaml --publish-url https://firmware.example.com/my-device --fw-version 1.0.0
+
+# Factory firmware that installs any pending update at boot
+ewt-gen my-device.yaml --publish-url https://firmware.example.com/my-device --update-on-boot
 ```
 
 ### OTA Updates and Dashboard Import
@@ -115,6 +119,15 @@ The version is required for OTA updates to work correctly. It can be specified v
 - `esphome.project.version` field in the YAML configuration
 
 If no version is found, a warning is shown and OTA components are omitted (dashboard import still works).
+
+With `--update-on-boot`, the factory firmware installs any pending update at
+boot: it keeps nudging the first update check until one completes (covering
+networks that come up late, such as first-boot provisioning), then installs
+if that check found an update. The decision is made exactly once per boot —
+updates published while the device is running are reported to Home Assistant
+as usual but not installed until the next boot, and a failed install is not
+retried until then either. Devices adopted via dashboard import keep manual
+update control (the automation lives in the factory YAML only).
 
 When OTA is enabled, each `manifest.json` build also gets an `ota` entry that
 ESPHome's `update.http_request` platform uses to update already-running

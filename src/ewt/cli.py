@@ -75,6 +75,15 @@ from ewt.generator import generate_site
     "release_summary",
     help="Short summary shown by the firmware update entity, added to each manifest OTA entry.",
 )
+@click.option(
+    "--update-on-boot",
+    "update_on_boot",
+    is_flag=True,
+    help=(
+        "Install any available firmware update at boot, once the first update "
+        "check completes. Requires --publish-url and a firmware version."
+    ),
+)
 def main(
     yaml_sources: tuple[str, ...],
     skip_compile: bool,
@@ -87,6 +96,7 @@ def main(
     fw_version: str | None,
     release_url: str | None,
     release_summary: str | None,
+    update_on_boot: bool,
 ):
     """Generate a static website for firmware distribution.
 
@@ -96,6 +106,8 @@ def main(
     """
     if pre_release and dev:
         raise click.UsageError("--pre-release and --dev are mutually exclusive.")
+    if update_on_boot and not publish_url:
+        raise click.UsageError("--update-on-boot requires --publish-url.")
 
     # Process all YAML sources and collect build info
     builds: list[dict] = []
@@ -185,12 +197,19 @@ def main(
             if package_import_url is None:
                 package_import_url = github_actions_import_url(yaml_file)
 
+            if update_on_boot and not config_version:
+                raise click.ClickException(
+                    f"--update-on-boot requires a firmware version for {yaml_file.name} "
+                    "(use --fw-version or esphome.project.version)."
+                )
+
             compile_yaml_file = create_factory_yaml(
                 yaml_file=yaml_file,
                 publish_url=publish_url,
                 package_import_url=package_import_url,
                 version=config_version,
                 chip_family=chip_family,
+                update_on_boot=update_on_boot,
             )
             if config_version:
                 click.echo(f"Added OTA update support for {yaml_file.name}")
@@ -671,12 +690,14 @@ def create_factory_yaml(
     package_import_url: str | None,
     version: str | None,
     chip_family: str | None = None,
+    update_on_boot: bool = False,
 ) -> Path:
     """Create a factory YAML that imports the original and adds OTA support.
 
     Creates a .factory.yaml file that:
     - Imports the original YAML as a package
     - Adds OTA, update, http_request components (only if version is provided)
+    - Optionally installs any available update at boot
     - Optionally adds dashboard_import
 
     Returns the path to the factory YAML file.
@@ -714,6 +735,45 @@ http_request:
         # ESP8266 requires verify_ssl: false due to limited SSL capabilities
         if chip_family and chip_family.upper() == "ESP8266":
             factory_content += "  verify_ssl: false\n"
+
+        if update_on_boot:
+            # Only globals and interval are added: both merge as lists, so
+            # they can never clobber automations in the imported config (an
+            # esphome.on_boot entry would, via ESPHome's dict deep-merge).
+            factory_content += """
+# Install any available firmware update at boot: nudge the first update check
+# until it completes (update.check is a no-op while the network is down, e.g.
+# during first-boot provisioning), then act on its verdict exactly once.
+# Updates detected later are not installed until the next boot.
+globals:
+  - id: boot_update_pending
+    type: bool
+    restore_value: no
+    initial_value: 'true'
+
+interval:
+  - interval: 60s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(boot_update_pending);'
+          then:
+            - if:
+                condition:
+                  lambda: 'return id(update_http_request).state != update::UPDATE_STATE_UNKNOWN;'
+                then:
+                  - globals.set:
+                      id: boot_update_pending
+                      value: 'false'
+                  - if:
+                      condition:
+                        update.is_available: update_http_request
+                      then:
+                        - update.perform:
+                            id: update_http_request
+                else:
+                  - update.check: update_http_request
+"""
 
     if package_import_url:
         factory_content += """
