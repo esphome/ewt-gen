@@ -109,36 +109,23 @@ def main(
         if temp_dir:
             temp_dirs.append(temp_dir)
 
-        # Load YAML to get configuration info (with ESPHome tag support)
-        with open(yaml_file) as f:
-            config = load_esphome_yaml(f)
+        # Read the configuration from ESPHome's own resolution: packages are
+        # merged and substitutions expanded, so the device name is found even
+        # when it comes from a package.
+        click.echo(f"Resolving {yaml_file.name} with ESPHome...")
+        resolved = resolve_esphome_config(
+            yaml_file, pre_release=pre_release, dev=dev
+        )
 
-        # Get substitutions for variable expansion
-        substitutions = config.get("substitutions", {})
-
-        def expand_substitutions(value: str) -> str:
-            """Expand ${var} substitutions in a string."""
-            if not isinstance(value, str):
-                return value
-            for key, sub_value in substitutions.items():
-                value = value.replace(f"${{{key}}}", str(sub_value))
-            return value
-
-        # Determine project name
-        esphome_config = config.get("esphome", {})
+        esphome_config = resolved.get("esphome", {})
         project_config = esphome_config.get("project", {})
-        esphome_project_name = expand_substitutions(project_config.get("name", ""))
-        device_name = expand_substitutions(esphome_config.get("name", "")) or yaml_file.stem
+        esphome_project_name = project_config.get("name", "")
+        device_name = esphome_config.get("name", "") or yaml_file.stem
 
         # Track project names for validation
         if esphome_project_name:
             project_names.add(esphome_project_name)
 
-        # Determine chip family.
-        click.echo(f"Resolving {yaml_file.name} with ESPHome...")
-        resolved = resolve_esphome_config(
-            yaml_file, pre_release=pre_release, dev=dev
-        )
         chip_family = detect_chip_family(resolved)
         if chip_family is None:
             raise click.ClickException(
@@ -157,13 +144,13 @@ def main(
         # Resolve the firmware version for this config (CLI flag wins, else YAML).
         config_version = fw_version
         if config_version is None:
-            config_version = expand_substitutions(project_config.get("version", "")) or None
+            config_version = project_config.get("version", "") or None
 
         # Store first config info for title/version/output defaults
         if first_config_info is None:
             first_config_info = {
                 "device_name": device_name,
-                "friendly_name": expand_substitutions(esphome_config.get("friendly_name", "")),
+                "friendly_name": esphome_config.get("friendly_name", ""),
                 "version": config_version,
                 "yaml_file": yaml_file,
                 "project_name": esphome_project_name,
