@@ -157,14 +157,20 @@ The tool generates a static website containing:
 
 When a configuration pulls in local packages, the top-level YAML on its own is
 not enough to build the firmware. In that case the configuration download
-becomes `{name}-config.zip`, holding the entry file and every local file it
-includes, recursively. Paths inside the zip keep their relative layout, so the
-config builds as-is once unpacked.
+becomes `{name}.esphomebundle.tar.gz`, made by `esphome bundle`. It holds the
+entry file and every local file it depends on, so ESPHome compiles it as-is:
 
-Both `!include` (short and `file:`/`vars:` form, with substitutions in the path)
-and the `!include_dir_*` tags are followed. Remote packages (`github://`
-shorthand or a `url:` block) are not bundled: ESPHome fetches those itself. A
-`secrets.yaml` is never bundled.
+```bash
+esphome compile my-device.esphomebundle.tar.gz
+```
+
+Remote packages (`github://` shorthand or a `url:` block) are not bundled:
+ESPHome fetches those itself. A configuration that pulls in nothing local keeps
+the plain YAML download.
+
+A bundle holds the secrets the configuration uses, so publish one only for a
+configuration whose secrets are already public (one kept in a repository, for
+example). ESPHome prints a warning when the bundle contains secrets.
 
 ### HTTPS Requirement
 

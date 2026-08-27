@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -218,9 +219,22 @@ def main(
                 ota_firmware = ota_firmware.resolve()
                 build_release_url = release_url or github_actions_release_url()
 
+        # A config built from local packages is not usable on its own, so
+        # offer the bundle ESPHome makes of it instead of the entry file.
+        bundle_dir = Path(tempfile.mkdtemp(prefix="ewt-bundle-"))
+        temp_dirs.append(bundle_dir)
+        config_bundle = create_config_bundle(
+            yaml_file,
+            bundle_dir / f"{yaml_file.stem}.esphomebundle.tar.gz",
+            pre_release=pre_release,
+            dev=dev,
+        )
+        if config_bundle and not bundle_holds_packages(config_bundle):
+            config_bundle = None
+
         builds.append({
             "yaml_file": yaml_file,
-            "config_includes": collect_local_includes(yaml_file),
+            "config_bundle": config_bundle,
             "compile_yaml_file": compile_yaml_file,
             "firmware": firmware.resolve(),
             "chip_family": chip_family,
@@ -305,142 +319,44 @@ def load_esphome_yaml(stream):
     return yaml.load(stream, Loader=ESPHomeLoader)
 
 
-# Directory includes take a directory and pull in every YAML file below it.
-INCLUDE_DIR_TAGS = (
-    "!include_dir_list",
-    "!include_dir_merge_list",
-    "!include_dir_named",
-    "!include_dir_merge_named",
-)
+def create_config_bundle(
+    yaml_file: Path,
+    output_path: Path,
+    *,
+    pre_release: bool = False,
+    dev: bool = False,
+) -> Path | None:
+    """Bundle a config and every local file it needs into one archive.
 
-
-def collect_local_includes(yaml_file: Path) -> list[Path]:
-    """Return the local files a config pulls in via ``!include``, recursively.
-
-    Local packages are ``!include``d, so the top-level YAML on its own is not a
-    complete configuration. Remote packages (``github://`` shorthand or a
-    ``url:`` block) are not listed here: ESPHome fetches those itself.
+    ESPHome builds the archive itself, so remote packages are left out and
+    local ones are followed the way the compiler follows them. Returns None
+    when ESPHome cannot make a bundle, which leaves the plain YAML as the
+    download.
     """
-    collected: list[Path] = []
-    seen = {yaml_file.resolve()}
+    cmd = _esphome_command(pre_release=pre_release, dev=dev)
+    cmd += ["bundle", str(yaml_file), "-o", str(output_path)]
 
-    def scan(current: Path, substitutions: dict[str, str]) -> None:
-        targets, substitutions = _include_targets(current, substitutions)
-        for target in targets:
-            if target.name in ("secrets.yaml", "secrets.yml"):
-                click.secho(
-                    f"Warning: skipping {target.name} included by {current.name}. "
-                    "Secrets are never published.",
-                    fg="yellow",
-                    err=True,
-                )
-                continue
-            resolved = target.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            collected.append(resolved)
-            scan(resolved, substitutions)
-
-    scan(yaml_file, {})
-    return collected
+    result = subprocess.run(cmd, cwd=yaml_file.parent)
+    if result.returncode != 0:
+        click.secho(
+            f"Warning: could not bundle {yaml_file.name}. The configuration "
+            "download will hold the top-level YAML only.",
+            fg="yellow",
+            err=True,
+        )
+        return None
+    return output_path
 
 
-def _include_targets(
-    yaml_file: Path, substitutions: dict[str, str]
-) -> tuple[list[Path], dict[str, str]]:
-    """Return the files one file includes, and the substitutions below it.
+def bundle_holds_packages(bundle: Path) -> bool:
+    """Whether a bundle holds more than the config file and its manifest.
 
-    The returned substitutions are the ones inherited from the including file,
-    updated with this file's own. ESPHome allows substitution variables in
-    include paths, so they have to be expanded to find the files.
-
-    Works on the YAML node tree instead of loaded objects, so ESPHome's custom
-    tags need no constructors and the include tags themselves survive.
+    A config that pulls in nothing local keeps the plain YAML download; an
+    archive would only get in the way.
     """
-    with open(yaml_file) as f:
-        try:
-            root = yaml.compose(f, Loader=yaml.SafeLoader)
-        except yaml.YAMLError:
-            return [], substitutions
-
-    substitutions = {**substitutions, **_node_substitutions(root)}
-
-    def walk(node):
-        if isinstance(node, yaml.ScalarNode):
-            if node.tag == "!include" or node.tag in INCLUDE_DIR_TAGS:
-                yield node.tag, node.value
-        elif isinstance(node, yaml.SequenceNode):
-            for child in node.value:
-                yield from walk(child)
-        elif isinstance(node, yaml.MappingNode):
-            for key, value in node.value:
-                # The long form is `!include {file: other.yaml, vars: {...}}`.
-                if (
-                    node.tag == "!include"
-                    and isinstance(key, yaml.ScalarNode)
-                    and key.value == "file"
-                    and isinstance(value, yaml.ScalarNode)
-                ):
-                    yield node.tag, value.value
-                yield from walk(key)
-                yield from walk(value)
-
-    directory = yaml_file.parent
-    targets: list[Path] = []
-    for tag, reference in walk(root):
-        for key, value in substitutions.items():
-            reference = reference.replace(f"${{{key}}}", value)
-        # ESPHome resolves includes relative to the file holding the directive.
-        path = directory / reference
-        if tag in INCLUDE_DIR_TAGS:
-            targets.extend(_directory_yaml_files(path))
-        elif path.is_file():
-            targets.append(path)
-        else:
-            click.secho(
-                f"Warning: {yaml_file.name} includes {reference}, which was not "
-                "found. The configuration download will be incomplete.",
-                fg="yellow",
-                err=True,
-            )
-    return targets, substitutions
-
-
-def _node_substitutions(root) -> dict[str, str]:
-    """Read the top-level ``substitutions:`` block from a YAML node tree."""
-    if not isinstance(root, yaml.MappingNode):
-        return {}
-    for key, value in root.value:
-        if (
-            isinstance(key, yaml.ScalarNode)
-            and key.value == "substitutions"
-            and isinstance(value, yaml.MappingNode)
-        ):
-            return {
-                sub_key.value: sub_value.value
-                for sub_key, sub_value in value.value
-                if isinstance(sub_key, yaml.ScalarNode)
-                and isinstance(sub_value, yaml.ScalarNode)
-            }
-    return {}
-
-
-def _directory_yaml_files(directory: Path) -> list[Path]:
-    """List the files an ``!include_dir_*`` tag pulls in.
-
-    Mirrors ESPHome: every ``*.yaml`` below the directory, skipping hidden
-    files and directories, and never secrets.
-    """
-    if not directory.is_dir():
-        return []
-    return sorted(
-        path
-        for path in directory.rglob("*.yaml")
-        if path.is_file()
-        and path.name != "secrets.yaml"
-        and not any(part.startswith(".") for part in path.relative_to(directory).parts)
-    )
+    with tarfile.open(bundle) as archive:
+        names = [name for name in archive.getnames() if name != "manifest.json"]
+    return len(names) > 1
 
 
 def resolve_yaml_source(source: str) -> tuple[Path, Path | None]:

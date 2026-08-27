@@ -3,10 +3,8 @@
 import hashlib
 import html
 import json
-import os
 import re
 import shutil
-import zipfile
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
@@ -34,7 +32,7 @@ def generate_site(
 
     builds is a list of dicts with keys:
         - yaml_file: Path to original YAML
-        - config_includes: Local files the YAML pulls in via !include
+        - config_bundle: Archive of the YAML and its local files, or None
         - compile_yaml_file: Path to compiled YAML (may include factory additions)
         - firmware: Path to firmware binary
         - chip_family: Normalized chip family string
@@ -100,15 +98,11 @@ def generate_site(
             shutil.copy(compile_yaml_file, output_dir / compile_yaml_file.name)
             yaml_files_copied.add(compile_yaml_file.name)
 
-        # A config built from local packages is incomplete on its own, so ship
-        # the whole tree as a zip and link that instead of the entry file.
-        config_zip_filename = None
-        includes = build.get("config_includes") or []
-        if includes:
-            config_zip_filename = f"{yaml_file.stem}-config.zip"
-            write_config_zip(
-                output_dir / config_zip_filename, yaml_file, includes
-            )
+        config_bundle = build.get("config_bundle")
+        config_bundle_filename = None
+        if config_bundle:
+            config_bundle_filename = config_bundle.name
+            shutil.copy(config_bundle, output_dir / config_bundle_filename)
 
         # Collect tab data
         tab_data.append({
@@ -116,7 +110,7 @@ def generate_site(
             "chip_id": chip_id,
             "firmware_filename": firmware_filename,
             "yaml_filename": yaml_file.name,
-            "config_zip_filename": config_zip_filename,
+            "config_bundle_filename": config_bundle_filename,
             "yaml_content": html.escape(yaml_file.read_text()),
             "compile_yaml_filename": compile_yaml_file.name if include_original_yaml else None,
             "compile_yaml_content": html.escape(compile_yaml_file.read_text()) if include_original_yaml else None,
@@ -160,19 +154,6 @@ def generate_site(
         f.write(html_output)
 
 
-def write_config_zip(zip_path: Path, yaml_file: Path, includes: list[Path]) -> None:
-    """Bundle a config and its local includes into one zip.
-
-    Paths are stored relative to the deepest directory holding all of them, so
-    the !include references inside the files keep resolving once unpacked.
-    """
-    files = [yaml_file, *includes]
-    root = Path(os.path.commonpath([str(f.parent) for f in files]))
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for file in files:
-            archive.write(file, file.relative_to(root))
-
-
 def generate_tabs_html(tab_data: list[dict], include_original_yaml: bool) -> tuple[str, str, str, str]:
     """Generate HTML for chip selection tabs.
 
@@ -204,11 +185,11 @@ def generate_tabs_html(tab_data: list[dict], include_original_yaml: bool) -> tup
         tab_labels_parts.append(f'<label for="tab-{chip_id}">{chip_family}</label>')
 
         # With local packages the entry file alone is not usable, so point the
-        # download at the zip holding the whole config tree.
-        if tab["config_zip_filename"]:
+        # download at the bundle holding the whole config tree.
+        if tab["config_bundle_filename"]:
             config_link = (
-                f'<a href="{tab["config_zip_filename"]}" download '
-                f'class="download-link">Download ZIP</a>'
+                f'<a href="{tab["config_bundle_filename"]}" download '
+                f'class="download-link">Download bundle</a>'
             )
         else:
             config_link = (
