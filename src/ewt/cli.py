@@ -318,6 +318,15 @@ def load_esphome_yaml(stream):
     return yaml.load(stream, Loader=ESPHomeLoader)
 
 
+# Directory includes take a directory and pull in every YAML file below it.
+INCLUDE_DIR_TAGS = (
+    "!include_dir_list",
+    "!include_dir_merge_list",
+    "!include_dir_named",
+    "!include_dir_merge_named",
+)
+
+
 def collect_local_includes(yaml_file: Path) -> list[Path]:
     """Return the local files a config pulls in via ``!include``, recursively.
 
@@ -328,9 +337,10 @@ def collect_local_includes(yaml_file: Path) -> list[Path]:
     collected: list[Path] = []
     seen = {yaml_file.resolve()}
 
-    def scan(current: Path) -> None:
-        for target in _include_targets(current):
-            if target.name == "secrets.yaml":
+    def scan(current: Path, substitutions: dict[str, str]) -> None:
+        targets, substitutions = _include_targets(current, substitutions)
+        for target in targets:
+            if target.name in ("secrets.yaml", "secrets.yml"):
                 click.secho(
                     f"Warning: skipping {target.name} included by {current.name}. "
                     "Secrets are never published.",
@@ -339,32 +349,40 @@ def collect_local_includes(yaml_file: Path) -> list[Path]:
                 )
                 continue
             resolved = target.resolve()
-            if resolved in seen or not resolved.is_file():
+            if resolved in seen:
                 continue
             seen.add(resolved)
             collected.append(resolved)
-            scan(resolved)
+            scan(resolved, substitutions)
 
-    scan(yaml_file)
+    scan(yaml_file, {})
     return collected
 
 
-def _include_targets(yaml_file: Path) -> list[Path]:
-    """Return the paths referenced by ``!include`` directives in one file.
+def _include_targets(
+    yaml_file: Path, substitutions: dict[str, str]
+) -> tuple[list[Path], dict[str, str]]:
+    """Return the files one file includes, and the substitutions below it.
+
+    The returned substitutions are the ones inherited from the including file,
+    updated with this file's own. ESPHome allows substitution variables in
+    include paths, so they have to be expanded to find the files.
 
     Works on the YAML node tree instead of loaded objects, so ESPHome's custom
-    tags need no constructors and the ``!include`` tag itself survives.
+    tags need no constructors and the include tags themselves survive.
     """
     with open(yaml_file) as f:
         try:
             root = yaml.compose(f, Loader=yaml.SafeLoader)
         except yaml.YAMLError:
-            return []
+            return [], substitutions
+
+    substitutions = {**substitutions, **_node_substitutions(root)}
 
     def walk(node):
         if isinstance(node, yaml.ScalarNode):
-            if node.tag == "!include":
-                yield node.value
+            if node.tag == "!include" or node.tag in INCLUDE_DIR_TAGS:
+                yield node.tag, node.value
         elif isinstance(node, yaml.SequenceNode):
             for child in node.value:
                 yield from walk(child)
@@ -377,21 +395,65 @@ def _include_targets(yaml_file: Path) -> list[Path]:
                     and key.value == "file"
                     and isinstance(value, yaml.ScalarNode)
                 ):
-                    yield value.value
+                    yield node.tag, value.value
                 yield from walk(key)
                 yield from walk(value)
 
     directory = yaml_file.parent
     targets: list[Path] = []
-    for reference in walk(root):
-        if not reference or reference.startswith(("http://", "https://")):
-            continue
+    for tag, reference in walk(root):
+        for key, value in substitutions.items():
+            reference = reference.replace(f"${{{key}}}", value)
         # ESPHome resolves includes relative to the file holding the directive.
-        if "*" in reference:
-            targets.extend(sorted(directory.glob(reference)))
+        path = directory / reference
+        if tag in INCLUDE_DIR_TAGS:
+            targets.extend(_directory_yaml_files(path))
+        elif path.is_file():
+            targets.append(path)
         else:
-            targets.append(directory / reference)
-    return targets
+            click.secho(
+                f"Warning: {yaml_file.name} includes {reference}, which was not "
+                "found. The configuration download will be incomplete.",
+                fg="yellow",
+                err=True,
+            )
+    return targets, substitutions
+
+
+def _node_substitutions(root) -> dict[str, str]:
+    """Read the top-level ``substitutions:`` block from a YAML node tree."""
+    if not isinstance(root, yaml.MappingNode):
+        return {}
+    for key, value in root.value:
+        if (
+            isinstance(key, yaml.ScalarNode)
+            and key.value == "substitutions"
+            and isinstance(value, yaml.MappingNode)
+        ):
+            return {
+                sub_key.value: sub_value.value
+                for sub_key, sub_value in value.value
+                if isinstance(sub_key, yaml.ScalarNode)
+                and isinstance(sub_value, yaml.ScalarNode)
+            }
+    return {}
+
+
+def _directory_yaml_files(directory: Path) -> list[Path]:
+    """List the files an ``!include_dir_*`` tag pulls in.
+
+    Mirrors ESPHome: every ``*.yaml`` below the directory, skipping hidden
+    files and directories, and never secrets.
+    """
+    if not directory.is_dir():
+        return []
+    return sorted(
+        path
+        for path in directory.rglob("*.yaml")
+        if path.is_file()
+        and path.name != "secrets.yaml"
+        and not any(part.startswith(".") for part in path.relative_to(directory).parts)
+    )
 
 
 def resolve_yaml_source(source: str) -> tuple[Path, Path | None]:

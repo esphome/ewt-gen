@@ -155,14 +155,16 @@ The tool generates a static website containing:
 
 ### Configurations with Packages
 
-When a configuration pulls in local packages (or any other `!include`), the
-top-level YAML on its own is not enough to build the firmware. In that case the
-configuration download becomes `{name}-config.zip`, holding the entry file and
-every local file it includes, recursively. Paths inside the zip keep their
-relative layout, so the config builds as-is once unpacked.
+When a configuration pulls in local packages, the top-level YAML on its own is
+not enough to build the firmware. In that case the configuration download
+becomes `{name}-config.zip`, holding the entry file and every local file it
+includes, recursively. Paths inside the zip keep their relative layout, so the
+config builds as-is once unpacked.
 
-Remote packages (`github://` shorthand or a `url:` block) are not bundled:
-ESPHome fetches those itself. A `secrets.yaml` is never bundled.
+Both `!include` (short and `file:`/`vars:` form, with substitutions in the path)
+and the `!include_dir_*` tags are followed. Remote packages (`github://`
+shorthand or a `url:` block) are not bundled: ESPHome fetches those itself. A
+`secrets.yaml` is never bundled.
 
 ### HTTPS Requirement
 
