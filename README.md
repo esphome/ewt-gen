@@ -153,6 +153,17 @@ The tool generates a static website containing:
 - **ESPHome configuration section** - Download links and expandable view of the YAML configuration
 - **Manual installation instructions** - For non-HTTPS contexts, with link to web.esphome.io
 
+### Configurations with Packages
+
+When a configuration pulls in local packages (or any other `!include`), the
+top-level YAML on its own is not enough to build the firmware. In that case the
+configuration download becomes `{name}-config.zip`, holding the entry file and
+every local file it includes, recursively. Paths inside the zip keep their
+relative layout, so the config builds as-is once unpacked.
+
+Remote packages (`github://` shorthand or a `url:` block) are not bundled:
+ESPHome fetches those itself. A `secrets.yaml` is never bundled.
+
 ### HTTPS Requirement
 
 Browser-based installation using ESP Web Tools requires a secure context (HTTPS or localhost). When served over HTTP, the page automatically shows manual installation instructions instead.

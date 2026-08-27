@@ -233,6 +233,7 @@ def main(
 
         builds.append({
             "yaml_file": yaml_file,
+            "config_includes": collect_local_includes(yaml_file),
             "compile_yaml_file": compile_yaml_file,
             "firmware": firmware.resolve(),
             "chip_family": chip_family,
@@ -315,6 +316,82 @@ def load_esphome_yaml(stream):
     ESPHomeLoader.add_multi_constructor("!", constructor_undefined)
 
     return yaml.load(stream, Loader=ESPHomeLoader)
+
+
+def collect_local_includes(yaml_file: Path) -> list[Path]:
+    """Return the local files a config pulls in via ``!include``, recursively.
+
+    Local packages are ``!include``d, so the top-level YAML on its own is not a
+    complete configuration. Remote packages (``github://`` shorthand or a
+    ``url:`` block) are not listed here: ESPHome fetches those itself.
+    """
+    collected: list[Path] = []
+    seen = {yaml_file.resolve()}
+
+    def scan(current: Path) -> None:
+        for target in _include_targets(current):
+            if target.name == "secrets.yaml":
+                click.secho(
+                    f"Warning: skipping {target.name} included by {current.name}. "
+                    "Secrets are never published.",
+                    fg="yellow",
+                    err=True,
+                )
+                continue
+            resolved = target.resolve()
+            if resolved in seen or not resolved.is_file():
+                continue
+            seen.add(resolved)
+            collected.append(resolved)
+            scan(resolved)
+
+    scan(yaml_file)
+    return collected
+
+
+def _include_targets(yaml_file: Path) -> list[Path]:
+    """Return the paths referenced by ``!include`` directives in one file.
+
+    Works on the YAML node tree instead of loaded objects, so ESPHome's custom
+    tags need no constructors and the ``!include`` tag itself survives.
+    """
+    with open(yaml_file) as f:
+        try:
+            root = yaml.compose(f, Loader=yaml.SafeLoader)
+        except yaml.YAMLError:
+            return []
+
+    def walk(node):
+        if isinstance(node, yaml.ScalarNode):
+            if node.tag == "!include":
+                yield node.value
+        elif isinstance(node, yaml.SequenceNode):
+            for child in node.value:
+                yield from walk(child)
+        elif isinstance(node, yaml.MappingNode):
+            for key, value in node.value:
+                # The long form is `!include {file: other.yaml, vars: {...}}`.
+                if (
+                    node.tag == "!include"
+                    and isinstance(key, yaml.ScalarNode)
+                    and key.value == "file"
+                    and isinstance(value, yaml.ScalarNode)
+                ):
+                    yield value.value
+                yield from walk(key)
+                yield from walk(value)
+
+    directory = yaml_file.parent
+    targets: list[Path] = []
+    for reference in walk(root):
+        if not reference or reference.startswith(("http://", "https://")):
+            continue
+        # ESPHome resolves includes relative to the file holding the directive.
+        if "*" in reference:
+            targets.extend(sorted(directory.glob(reference)))
+        else:
+            targets.append(directory / reference)
+    return targets
 
 
 def resolve_yaml_source(source: str) -> tuple[Path, Path | None]:
