@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -109,36 +110,23 @@ def main(
         if temp_dir:
             temp_dirs.append(temp_dir)
 
-        # Load YAML to get configuration info (with ESPHome tag support)
-        with open(yaml_file) as f:
-            config = load_esphome_yaml(f)
+        # Read the configuration from ESPHome's own resolution: packages are
+        # merged and substitutions expanded, so the device name is found even
+        # when it comes from a package.
+        click.echo(f"Resolving {yaml_file.name} with ESPHome...")
+        resolved = resolve_esphome_config(
+            yaml_file, pre_release=pre_release, dev=dev
+        )
 
-        # Get substitutions for variable expansion
-        substitutions = config.get("substitutions", {})
-
-        def expand_substitutions(value: str) -> str:
-            """Expand ${var} substitutions in a string."""
-            if not isinstance(value, str):
-                return value
-            for key, sub_value in substitutions.items():
-                value = value.replace(f"${{{key}}}", str(sub_value))
-            return value
-
-        # Determine project name
-        esphome_config = config.get("esphome", {})
+        esphome_config = resolved.get("esphome", {})
         project_config = esphome_config.get("project", {})
-        esphome_project_name = expand_substitutions(project_config.get("name", ""))
-        device_name = expand_substitutions(esphome_config.get("name", "")) or yaml_file.stem
+        esphome_project_name = project_config.get("name", "")
+        device_name = esphome_config.get("name", "") or yaml_file.stem
 
         # Track project names for validation
         if esphome_project_name:
             project_names.add(esphome_project_name)
 
-        # Determine chip family.
-        click.echo(f"Resolving {yaml_file.name} with ESPHome...")
-        resolved = resolve_esphome_config(
-            yaml_file, pre_release=pre_release, dev=dev
-        )
         chip_family = detect_chip_family(resolved)
         if chip_family is None:
             raise click.ClickException(
@@ -157,13 +145,13 @@ def main(
         # Resolve the firmware version for this config (CLI flag wins, else YAML).
         config_version = fw_version
         if config_version is None:
-            config_version = expand_substitutions(project_config.get("version", "")) or None
+            config_version = project_config.get("version", "") or None
 
         # Store first config info for title/version/output defaults
         if first_config_info is None:
             first_config_info = {
                 "device_name": device_name,
-                "friendly_name": expand_substitutions(esphome_config.get("friendly_name", "")),
+                "friendly_name": esphome_config.get("friendly_name", ""),
                 "version": config_version,
                 "yaml_file": yaml_file,
                 "project_name": esphome_project_name,
@@ -231,8 +219,22 @@ def main(
                 ota_firmware = ota_firmware.resolve()
                 build_release_url = release_url or github_actions_release_url()
 
+        # A config built from local packages is not usable on its own, so
+        # offer the bundle ESPHome makes of it instead of the entry file.
+        bundle_dir = Path(tempfile.mkdtemp(prefix="ewt-bundle-"))
+        temp_dirs.append(bundle_dir)
+        config_bundle = create_config_bundle(
+            yaml_file,
+            bundle_dir / f"{yaml_file.stem}.esphomebundle.tar.gz",
+            pre_release=pre_release,
+            dev=dev,
+        )
+        if config_bundle and not bundle_holds_packages(config_bundle):
+            config_bundle = None
+
         builds.append({
             "yaml_file": yaml_file,
+            "config_bundle": config_bundle,
             "compile_yaml_file": compile_yaml_file,
             "firmware": firmware.resolve(),
             "chip_family": chip_family,
@@ -315,6 +317,46 @@ def load_esphome_yaml(stream):
     ESPHomeLoader.add_multi_constructor("!", constructor_undefined)
 
     return yaml.load(stream, Loader=ESPHomeLoader)
+
+
+def create_config_bundle(
+    yaml_file: Path,
+    output_path: Path,
+    *,
+    pre_release: bool = False,
+    dev: bool = False,
+) -> Path | None:
+    """Bundle a config and every local file it needs into one archive.
+
+    ESPHome builds the archive itself, so remote packages are left out and
+    local ones are followed the way the compiler follows them. Returns None
+    when ESPHome cannot make a bundle, which leaves the plain YAML as the
+    download.
+    """
+    cmd = _esphome_command(pre_release=pre_release, dev=dev)
+    cmd += ["bundle", str(yaml_file), "-o", str(output_path)]
+
+    result = subprocess.run(cmd, cwd=yaml_file.parent)
+    if result.returncode != 0:
+        click.secho(
+            f"Warning: could not bundle {yaml_file.name}. The configuration "
+            "download will hold the top-level YAML only.",
+            fg="yellow",
+            err=True,
+        )
+        return None
+    return output_path
+
+
+def bundle_holds_packages(bundle: Path) -> bool:
+    """Whether a bundle holds more than the config file and its manifest.
+
+    A config that pulls in nothing local keeps the plain YAML download; an
+    archive would only get in the way.
+    """
+    with tarfile.open(bundle) as archive:
+        names = [name for name in archive.getnames() if name != "manifest.json"]
+    return len(names) > 1
 
 
 def resolve_yaml_source(source: str) -> tuple[Path, Path | None]:

@@ -32,6 +32,7 @@ def generate_site(
 
     builds is a list of dicts with keys:
         - yaml_file: Path to original YAML
+        - config_bundle: Archive of the YAML and its local files, or None
         - compile_yaml_file: Path to compiled YAML (may include factory additions)
         - firmware: Path to firmware binary
         - chip_family: Normalized chip family string
@@ -97,12 +98,19 @@ def generate_site(
             shutil.copy(compile_yaml_file, output_dir / compile_yaml_file.name)
             yaml_files_copied.add(compile_yaml_file.name)
 
+        config_bundle = build.get("config_bundle")
+        config_bundle_filename = None
+        if config_bundle:
+            config_bundle_filename = config_bundle.name
+            shutil.copy(config_bundle, output_dir / config_bundle_filename)
+
         # Collect tab data
         tab_data.append({
             "chip_family": chip_family,
             "chip_id": chip_id,
             "firmware_filename": firmware_filename,
             "yaml_filename": yaml_file.name,
+            "config_bundle_filename": config_bundle_filename,
             "yaml_content": html.escape(yaml_file.read_text()),
             "compile_yaml_filename": compile_yaml_file.name if include_original_yaml else None,
             "compile_yaml_content": html.escape(compile_yaml_file.read_text()) if include_original_yaml else None,
@@ -176,12 +184,25 @@ def generate_tabs_html(tab_data: list[dict], include_original_yaml: bool) -> tup
         # Label
         tab_labels_parts.append(f'<label for="tab-{chip_id}">{chip_family}</label>')
 
+        # With local packages the entry file alone is not usable, so point the
+        # download at the bundle holding the whole config tree.
+        if tab["config_bundle_filename"]:
+            config_link = (
+                f'<a href="{tab["config_bundle_filename"]}" download '
+                f'class="download-link">Download bundle</a>'
+            )
+        else:
+            config_link = (
+                f'<a href="{tab["yaml_filename"]}" download '
+                f'class="download-link">Download</a>'
+            )
+
         # Content
         content_parts = [
             f'<div class="tab-content content-{chip_id}">',
             f'  <div class="firmware-row"><span>Firmware</span> <a href="{tab["firmware_filename"]}" download class="download-link">Download</a></div>',
             f'  <details class="yaml-details">',
-            f'    <summary><span class="summary-content">Configuration <a href="{tab["yaml_filename"]}" download class="download-link">Download</a></span></summary>',
+            f'    <summary><span class="summary-content">Configuration {config_link}</span></summary>',
             f'    <pre><code>{tab["yaml_content"]}</code></pre>',
             f'  </details>',
         ]
