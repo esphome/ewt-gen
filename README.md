@@ -2,7 +2,88 @@
 
 Generate static websites for ESPHome firmware distribution using ESP Web Tools. [Example output.](https://esphome.github.io/ewt-gen/)
 
-## Quick Start
+## Recommended: publish with GitHub Actions
+
+The easiest way to use ewt-gen is a GitHub Actions workflow that builds your firmware page and publishes it to GitHub Pages. The Pages URL is used automatically for two things:
+
+- **OTA updates** — devices check the published page for new firmware and update over the air.
+- **Dashboard import** — users adopt the device ("Take Control") in the ESPHome Dashboard.
+
+You do not set any URLs by hand. The workflow reads the Pages URL from `actions/configure-pages`, and ewt-gen derives the dashboard import link (`github://owner/repo/config.yaml@ref`) from the GitHub Actions context.
+
+### Setup
+
+1. Put your ESPHome config (for example `my-device.yaml`) in the repository.
+2. In the repository settings, open **Settings → Pages** and set **Source** to **GitHub Actions**.
+3. Add the workflow below as `.github/workflows/firmware.yml`.
+4. Replace `my-device.yaml` with your config filename.
+
+Every push to `main` rebuilds the site and publishes it at `https://<owner>.github.io/<repo>/`.
+
+```yaml
+name: Firmware
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Let the workflow publish to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Publish one deployment at a time
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Compute firmware version
+        id: version
+        run: |
+          date="$(git show -s --format=%cs HEAD)"
+          echo "value=${date//-/.}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate site
+        run: |
+          uvx ewt-gen my-device.yaml \
+            --output _site \
+            --publish-url "${{ steps.pages.outputs.base_url }}" \
+            --fw-version "${{ steps.version.outputs.value }}"
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+```
+
+## Local usage
 
 ```bash
 # From a local file
